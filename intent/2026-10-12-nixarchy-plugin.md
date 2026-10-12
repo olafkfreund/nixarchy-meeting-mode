@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: none (issues are disabled on this repo)
 author: olafkfreund
 ---
@@ -71,6 +71,9 @@ against real binaries. Findings:
 - Plugin folder must contain no symlinks (`omarchy-plugin-validate` refuses them).
 
 ## Open questions
+
+Resolved at approval (2026-10-12): the proposed answer to each stands —
+1 yes, 2 yes, 3 this repo only, 4 leave it.
 
 1. **"nixi voice control" = `omarchy-voice` (nixarchy-voice)?** Nixi itself has
    no voice input (its README sends dictation to Omarchy's). I assume you mean
