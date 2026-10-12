@@ -145,6 +145,31 @@ directory. It is never written to `/tmp`.
 Recording apps that aren't call apps (OBS, Audacity, dictation tools, nixarchy voice's wake word)
 never start meeting mode.
 
+Each action checks first and changes only what needs changing. If Do Not Disturb is already
+on, or voice control isn't running, that action does nothing and nothing is recorded. When the
+call ends, only what is in the record is undone, so anything you set yourself stays as it was.
+
+Voice control is paused by stopping its user service (`omarchy-voice.service`) and starting it
+again after the call. Stopping the service frees the microphone completely, so its wake word
+can't hear the meeting. Closing the conversation would leave the wake word listening.
+
+Installed through the flake, the plugin is a plain copy of this folder with `jq` built into
+the helper's PATH. The NixOS module hands it to nixarchy's own plugin option
+(`programs.nixarchy.plugins`) through Home Manager's `sharedModules`. nixarchy checks the
+manifest when you rebuild and links the plugin into `~/.config/omarchy/plugins/`.
+
+## Limits
+
+- **Voice started by hand:** a voice daemon you started with `omarchy-voice run`, rather than
+  the service, is not paused.
+- **Things you change during the call:** the record is made when meeting mode starts.
+  - If you stop the voice service yourself during a call, it is started again afterwards.
+  - If you turn Stay Awake on yourself during a call, it is turned off afterwards.
+- **Home Manager switch during a call:** running one may start the voice service again before
+  the call ends.
+- **Voice start-up time:** after the call, voice control needs its usual start-up time before
+  it answers again.
+
 ## Update
 
 With the module: `nix flake update meeting-mode`, then rebuild. Without it:
