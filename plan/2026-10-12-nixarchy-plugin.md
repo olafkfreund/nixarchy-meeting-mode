@@ -242,6 +242,8 @@ plugin: `manifest.json`, `Service.qml`, `BarWidget.qml`, `Settings.qml`,
    - Under the screenshots: a one-line note that they still show the old "Pause Jarvis" label.
    → verify: `grep -n -i jarvis README.md` matches only the credit line and the
    screenshot note; `grep -n 'io.github.jburchel' README.md` prints nothing.
+   Deviation (implementation): the old id appears once, on purpose, in the
+   "settings are not carried over" note this step requires.
 
 ## Tests
 
