@@ -293,6 +293,8 @@ plugin: `manifest.json`, `Service.qml`, `BarWidget.qml`, `Settings.qml`,
    - README NixOS-module snippet: unchanged (still `nixosModules.default` +
      `programs.nixarchy.meetingMode.enable`); add one line for Home Manager
      users: `imports = [ inputs.meeting-mode.homeModules.default ];`.
+     Deviation (re-review): README also says the NixOS route needs nixarchy's
+     Home Manager module for every HM user (the installer's sharedModules has it).
    → verify: `nix flake check -L` passes; break the stub's placement (declare
    `programs.nixarchy.plugins` at the NixOS level instead) and confirm the
    `module` check fails, then restore it.

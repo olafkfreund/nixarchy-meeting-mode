@@ -47,6 +47,10 @@ imports = [ inputs.meeting-mode.nixosModules.default ];
 programs.nixarchy.meetingMode.enable = true;
 ```
 
+The NixOS module adds the plugin for every Home Manager user, so each one needs nixarchy's
+Home Manager module: the installer's `home-manager.sharedModules` already includes it. If you
+import nixarchy per user instead, use the Home Manager route for those users.
+
 Home Manager users without the NixOS module: `imports = [ inputs.meeting-mode.homeModules.default ];`
 
 Rebuild, then enable it once in Setup → Plugins, or with
