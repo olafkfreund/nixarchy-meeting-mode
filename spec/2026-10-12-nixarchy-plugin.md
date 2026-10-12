@@ -1,5 +1,5 @@
 ---
-status: approved
+status: draft
 issue: none (issues are disabled on this repo)
 intent: intent/2026-10-12-nixarchy-plugin.md
 ---
@@ -95,6 +95,71 @@ section naming Jim Burchel as the original author (MIT) with a link to
 upstream. The "More Omarchy plugins by Jim Burchel" promo section is replaced by that credit.
 `docs/settings.png` and `preview.png` still show "Pause Jarvis"; noted as stale,
 not regenerated here (needs a live desktop).
+
+## Amendment (requested at spec approval, 2026-10-12): NixOS install and CI
+
+Sections 1–6 above are approved as written. Sections 7–9 are new and need approval.
+
+### 7. NixOS module (`flake.nix` → `nixosModules.default`, new `module.nix`)
+
+nixarchy already installs third-party plugins declaratively through
+`programs.nixarchy.plugins.<name>.src` (`nixarchy/modules/home.nix:677`): it
+validates the manifest at build time and links the folder into
+`~/.config/omarchy/plugins/<id>`. The module reuses that rather than writing
+its own linking, following the `programs.nixarchy.flatsnap` namespace precedent:
+
+```nix
+{ config, lib, pkgs, ... }:
+let cfg = config.programs.nixarchy.meetingMode; in {
+  options.programs.nixarchy.meetingMode = {
+    enable = lib.mkEnableOption "Meeting Mode: a quiet desktop during calls";
+    package = lib.mkOption { type = lib.types.package; default = <this flake's package for pkgs.system>; };
+  };
+  config = lib.mkIf cfg.enable {
+    programs.nixarchy.plugins.meeting-mode.src = cfg.package;
+  };
+}
+```
+
+Usage in a nixarchy configuration:
+
+```nix
+inputs.meeting-mode.url = "github:olafkfreund/nixarchy-meeting-mode";
+# modules = [ … inputs.meeting-mode.nixosModules.default ];
+programs.nixarchy.meetingMode.enable = true;
+```
+
+Installed, not enabled. As with every nixarchy-declared plugin, you turn it on once
+in Setup → Plugins or with `omarchy plugin enable nixarchy.meeting-mode`.
+nixarchy records that choice in `shell.json`. The README documents both
+install routes (module, `omarchy plugin add`).
+
+Not done: a Home Manager module. `programs.nixarchy.plugins` is the one path
+nixarchy validates, and non-nixarchy systems have no Omarchy shell to load it.
+
+### 8. Lint as flake checks
+
+Added to `checks.<system>`, so CI and `nix flake check` run the same thing:
+- `shellcheck`: `bin/meeting-mode-actions`, `tests/actions.test.sh`. Today's one
+  finding (SC2174 on `mkdir -p -m 700`) is deliberate: the next line's
+  `chmod 700` covers it. It gets a `# shellcheck disable=SC2174` comment with that reason.
+- `nixfmt`: `nixfmt --check` over `*.nix`; `formatter` output set to `nixfmt`.
+- `module`: evaluates `nixosModules.default` against a stub that declares
+  `programs.nixarchy.plugins`, and asserts that `enable = true` sets `src` to the package.
+
+Not linted: QML. `qmllint` has no Quickshell type info and flags every
+import. The existing `qml-text.test.js` stays the QML guard.
+
+### 9. GitHub workflow `.github/workflows/check.yml`
+
+Modelled on `nixarchy-flatsnap/.github/workflows/check.yml`: on `pull_request`
+and push to `main`, `contents: read`, concurrency-cancelled, actions pinned by
+SHA (same pins as flatsnap). Two jobs, so a lint failure and a test failure
+show separately:
+- `lint`: `nix build -L .#checks.x86_64-linux.{shellcheck,nixfmt}`
+- `test`: `nix flake check -L` (all checks, including tests, package and module eval)
+
+No KVM step: there is no VM test.
 
 ## Alternatives rejected
 
