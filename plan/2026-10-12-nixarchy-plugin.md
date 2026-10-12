@@ -245,6 +245,60 @@ plugin: `manifest.json`, `Service.qml`, `BarWidget.qml`, `Settings.qml`,
    Deviation (implementation): the old id appears once, on purpose, in the
    "settings are not carried over" note this step requires.
 
+8. **Review fixes (spec "Amendment 2"). Voice: stop the service.**
+   - `bin/meeting-mode-actions`: replace the voice block in `turn_on` with
+     ```bash
+     # nixarchy voice control, when its service is running: stop it for the
+     # call, so neither its wake word nor a conversation hears the meeting.
+     if [[ $actions == *,voice,* ]] && systemctl --user is-active --quiet omarchy-voice.service 2>/dev/null; then
+       systemctl --user stop omarchy-voice.service >/dev/null 2>&1 && record voice
+     fi
+     ```
+     and the `turn_off` case with `voice)         systemctl --user start omarchy-voice.service >/dev/null 2>&1 ;;`.
+   - `Settings.qml` voice hint: `"Stop nixarchy voice, wake word included, during the call, if it is running"`.
+   - `tests/actions.test.sh`: replace the `omarchy-voice` stand-in with a
+     `systemctl` stand-in. `--user is-active --quiet omarchy-voice.service`
+     exits 0 iff `$FAKE/voice` is `active` (default `active`); `--user stop
+     omarchy-voice.service` writes `inactive`; `--user start ...` writes `active`.
+     Anything else exits 1. Update the guard loop (`systemctl`
+     instead of `omarchy-voice`), the comment on L4, and `state()`'s default
+     (`active`). Expected values: case 1 `voice=inactive` while on; case 2
+     pre-set `echo inactive >"$FAKE/voice"`; cases 3 and 4 `voice=active`;
+     case 5 removes the `systemctl` stand-in ("no voice").
+   - `README.md` table row: `| **Voice control** (nixarchy voice) | Stopped, wake word included | Started again, if it was running |`;
+     add a sentence after the table: the voice service takes its usual
+     warm-up after the call, and a daemon started by hand with
+     `omarchy-voice run` is not paused.
+   → verify: `bash tests/actions.test.sh` → `13 passed, 0 failed`; shellcheck clean.
+   Traps: a real `systemctl --user stop` would stop the developer's real voice
+   service. The guard loop must refuse to run unless `systemctl` is the
+   stand-in. A host PreToolUse hook blocks shell commands whose text contains
+   `systemctl --user stop`. Use the Edit/Write tools for file edits, and run
+   the test as `bash tests/actions.test.sh`, which does not contain that text.
+
+9. **Review fixes. Module via Home Manager sharedModules.**
+   - `module.nix` `config`: `home-manager.sharedModules = [ { programs.nixarchy.plugins.meeting-mode.src = cfg.package; } ];`
+     Update the header comment: the option is Home Manager's (nixarchy
+     `modules/home.nix`), reached through home-manager's `sharedModules`.
+   - `flake.nix`: add `homeModules.default = { pkgs, ... }: { programs.nixarchy.plugins.meeting-mode.src = self.packages.${pkgs.stdenv.hostPlatform.system}.default; };`
+   - `flake.nix` `module` check: a NixOS-level stub declares
+     `home-manager.sharedModules` (`listOf raw`, default `[ ]`); a separate
+     Home Manager-level stub declares `programs.nixarchy.plugins`. Evaluate the
+     NixOS module with enable on/off. Then evaluate `[ hmStub ] ++ on.home-manager.sharedModules`
+     and `[ hmStub self.homeModules.default { _module.args.pkgs = pkgs; } ]` with
+     `lib.evalModules`. Assert `src` is the plugin in both, and that off gives
+     `sharedModules == [ ]`.
+   - README NixOS-module snippet: unchanged (still `nixosModules.default` +
+     `programs.nixarchy.meetingMode.enable`); add one line for Home Manager
+     users: `imports = [ inputs.meeting-mode.homeModules.default ];`.
+   → verify: `nix flake check -L` passes; break the stub's placement (declare
+   `programs.nixarchy.plugins` at the NixOS level instead) and confirm the
+   `module` check fails, then restore it.
+
+10. **LICENSE**: delete from the `---` line after the MIT text through the end
+    (the Jarvis "Third-party components" section).
+    → verify: `grep -c -i jarvis LICENSE` prints `0`.
+
 ## Tests
 
 | Command | Expected |

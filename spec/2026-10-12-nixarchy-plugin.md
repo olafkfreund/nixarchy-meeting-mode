@@ -161,6 +161,43 @@ show separately:
 
 No KVM step: there is no VM test.
 
+## Amendment 2 (review findings; decided by the user, 2026-10-12)
+
+The Opus review of the implementation found two defects in approved
+decisions. The user chose the fix for each (AskUserQuestion, this session);
+this section records those choices.
+
+### 1 (replaces the `listen stop` design): stop the voice service
+
+`omarchy-voice listen stop` only closes an open conversation. With a wake word
+set, the daemon's `_listen_loop` (`local_engine.py:907`) keeps running
+`_wake_turn()` while `idle`, so the wake word goes on hearing the meeting.
+**Decision:** if `systemctl --user is-active --quiet omarchy-voice.service`, stop
+that unit and on success record `voice`; undo starts it again. This frees the
+microphone completely: no wake word, no conversation, no speech. The cost is the
+daemon's warm-up after the call. Not covered: a daemon started by hand with
+`omarchy-voice run`. The settings hint and README say what it does.
+
+### 7 (corrects the module): NixOS module via Home Manager sharedModules
+
+`programs.nixarchy.plugins` is a Home Manager option (nixarchy
+`modules/home.nix`), not a NixOS one, so the module as written fails to
+evaluate on a real system. The check's stub hid this. **Decision:**
+`nixosModules.default` keeps `programs.nixarchy.meetingMode.{enable,package}`
+at the NixOS level, and sets
+`home-manager.sharedModules = [ { programs.nixarchy.plugins.meeting-mode.src = cfg.package; } ]`.
+nixarchy imports home-manager's NixOS module, so the option exists. Also exported:
+`homeModules.default`, which installs the plugin for one user. The `module`
+check now mirrors where each option really lives: a NixOS-level stub declares
+`home-manager.sharedModules`, and a Home Manager-level stub declares
+`programs.nixarchy.plugins`.
+
+### LICENSE
+
+The "Third-party components" section is a copy of Jarvis's notice (edge-tts,
+openwakeword, ...) and does not describe this plugin. It is removed; the MIT
+text stays.
+
 ## Alternatives rejected
 
 - **Keep Jarvis alongside voice.** Not shipped on nixarchy; you asked to replace it.
