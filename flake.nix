@@ -41,6 +41,14 @@
     {
       nixosModules.default = import ./module.nix self;
 
+      # For Home Manager users who do not use the NixOS module.
+      homeModules.default =
+        { pkgs, ... }:
+        {
+          programs.nixarchy.plugins.meeting-mode.src =
+            self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        };
+
       formatter = forAll (system: nixpkgs.legacyPackages.${system}.nixfmt);
 
       packages = forAll (system: {
@@ -53,8 +61,17 @@
           pkgs = nixpkgs.legacyPackages.${system};
           plugin = self.packages.${system}.default;
 
-          # Stands in for nixarchy's plugin option.
-          stub =
+          # Stand-ins for the real option sites: home-manager's sharedModules at
+          # the NixOS level, nixarchy's plugin option at the Home Manager level.
+          nixosStub =
+            { lib, ... }:
+            {
+              options.home-manager.sharedModules = lib.mkOption {
+                type = lib.types.listOf lib.types.raw;
+                default = [ ];
+              };
+            };
+          hmStub =
             { lib, ... }:
             {
               options.programs.nixarchy.plugins = lib.mkOption {
@@ -71,13 +88,17 @@
             (pkgs.lib.evalModules {
               modules = [
                 self.nixosModules.default
-                stub
+                nixosStub
                 {
                   _module.args.pkgs = pkgs;
                   programs.nixarchy.meetingMode.enable = enable;
                 }
               ];
             }).config;
+          hmSrc =
+            modules:
+            (pkgs.lib.evalModules { modules = [ hmStub ] ++ modules; })
+            .config.programs.nixarchy.plugins.meeting-mode.src;
           on = evalWith true;
           off = evalWith false;
         in
@@ -121,8 +142,13 @@
           '';
 
           module =
-            assert "${on.programs.nixarchy.plugins.meeting-mode.src}" == "${plugin}";
-            assert off.programs.nixarchy.plugins == { };
+            assert "${hmSrc on.home-manager.sharedModules}" == "${plugin}";
+            assert
+              "${hmSrc [
+                self.homeModules.default
+                { _module.args.pkgs = pkgs; }
+              ]}" == "${plugin}";
+            assert off.home-manager.sharedModules == [ ];
             pkgs.runCommand "nixarchy-meeting-mode-module" { } "touch $out";
         }
       );

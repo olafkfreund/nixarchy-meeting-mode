@@ -1,5 +1,6 @@
-# Reuses programs.nixarchy.plugins: nixarchy validates the manifest and links
-# the package into the plugin folder (installed, not enabled).
+# programs.nixarchy.plugins is a Home Manager option (nixarchy modules/home.nix):
+# nixarchy validates the manifest and links the package into the plugin folder
+# (installed, not enabled). Reached from NixOS through home-manager's sharedModules.
 self:
 {
   config,
@@ -22,6 +23,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    programs.nixarchy.plugins.meeting-mode.src = cfg.package;
+    home-manager.sharedModules = [
+      { programs.nixarchy.plugins.meeting-mode.src = cfg.package; }
+    ];
   };
 }

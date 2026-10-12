@@ -17,8 +17,11 @@ The screenshots still show the old "Pause Jarvis" label.
 | **Do Not Disturb** | Notification pop-ups stay silent | Back on, if they were on before |
 | **Stay awake** | No idle lock or screen blank while you listen | Normal idle behaviour returns |
 | **Night light** | Off, so your camera picture isn't tinted orange | Back to the exact temperature it had |
-| **Voice control** (nixarchy voice) | Stops listening and talking | Listening again, if it was before |
+| **Voice control** (nixarchy voice) | Stopped, wake word included | Started again, if it was running |
 | **Music and videos** *(optional)* | Paused | Resumed where they left off |
+
+The voice service takes its usual warm-up after the call, and a daemon started by hand with
+`omarchy-voice run` is not paused.
 
 Meeting Mode only undoes what it changed. If Do Not Disturb or Stay Awake was already on
 before the call, it stays on afterwards. It keeps a record of its changes on disk, so even a
@@ -43,6 +46,8 @@ inputs.meeting-mode.url = "github:olafkfreund/nixarchy-meeting-mode";
 imports = [ inputs.meeting-mode.nixosModules.default ];
 programs.nixarchy.meetingMode.enable = true;
 ```
+
+Home Manager users without the NixOS module: `imports = [ inputs.meeting-mode.homeModules.default ];`
 
 Rebuild, then enable it once in Setup → Plugins, or with
 `omarchy plugin enable nixarchy.meeting-mode --section center`.

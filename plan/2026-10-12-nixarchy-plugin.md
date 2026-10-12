@@ -270,6 +270,8 @@ plugin: `manifest.json`, `Service.qml`, `BarWidget.qml`, `Settings.qml`,
      warm-up after the call, and a daemon started by hand with
      `omarchy-voice run` is not paused.
    → verify: `bash tests/actions.test.sh` → `13 passed, 0 failed`; shellcheck clean.
+   Deviation (implementation): `have()` was removed from the helper. Its only
+   caller was the Jarvis/omarchy-voice block, so it was now dead code.
    Traps: a real `systemctl --user stop` would stop the developer's real voice
    service. The guard loop must refuse to run unless `systemctl` is the
    stand-in. A host PreToolUse hook blocks shell commands whose text contains
