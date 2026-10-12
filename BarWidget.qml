@@ -14,7 +14,7 @@ import "SettingsModel.js" as SettingsModel
 //   middle click  back to automatic
 BarWidget {
     id: root
-    moduleName: "io.github.jburchel.meeting-mode"
+    moduleName: "nixarchy.meeting-mode"
 
     property var state: ({})
     readonly property bool active: state.active === true

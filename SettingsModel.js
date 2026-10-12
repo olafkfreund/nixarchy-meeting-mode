@@ -1,7 +1,7 @@
 .pragma library
 
 // Settings live in this plugin's entry of ~/.config/omarchy/shell.json
-// ("plugins": [{ "id": "io.github.jburchel.meeting-mode", ... }]).
+// ("plugins": [{ "id": "nixarchy.meeting-mode", ... }]).
 // normalize() turns whatever is there into a complete, valid set.
 
 var DEFAULTS = {

@@ -15,7 +15,7 @@ Item {
 
     property var shell: null
     property var manifest: null
-    readonly property string pluginId: String((root.manifest && root.manifest.id) || "io.github.jburchel.meeting-mode")
+    readonly property string pluginId: String((root.manifest && root.manifest.id) || "nixarchy.meeting-mode")
 
     property bool opened: false
     property int cursor: 0
