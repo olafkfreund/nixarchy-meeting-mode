@@ -21,10 +21,10 @@ test("defaults", () => {
   assert.strictEqual(D.dnd, true);
   assert.strictEqual(D.awake, true);
   assert.strictEqual(D.nightlight, true);
-  assert.strictEqual(D.jarvis, true);
+  assert.strictEqual(D.voice, true);
   assert.strictEqual(D.pauseMedia, false, "pausing media is opt-in");
   assert.strictEqual(D.endDelay, 15);
-  assert.strictEqual(M.actionList(D), "dnd,awake,nightlight,jarvis");
+  assert.strictEqual(M.actionList(D), "dnd,awake,nightlight,voice");
 });
 
 test("bad values fall back", () => {
@@ -37,8 +37,8 @@ test("bad values fall back", () => {
 });
 
 test("action list follows switches", () => {
-  assert.strictEqual(M.actionList(M.normalize({ awake: false, jarvis: false })), "dnd,nightlight");
-  assert.strictEqual(M.actionList(M.normalize({ dnd: false, awake: false, nightlight: false, jarvis: false })), "");
+  assert.strictEqual(M.actionList(M.normalize({ awake: false, voice: false })), "dnd,nightlight");
+  assert.strictEqual(M.actionList(M.normalize({ dnd: false, awake: false, nightlight: false, voice: false })), "");
 });
 
 test("call apps are detected", () => {

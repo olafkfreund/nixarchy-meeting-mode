@@ -14,7 +14,7 @@ import "SettingsModel.js" as SettingsModel
 //   middle click  back to automatic
 BarWidget {
     id: root
-    moduleName: "io.github.jburchel.meeting-mode"
+    moduleName: "nixarchy.meeting-mode"
 
     property var state: ({})
     readonly property bool active: state.active === true
@@ -23,8 +23,7 @@ BarWidget {
         dnd: "Do Not Disturb on",
         awake: "staying awake",
         nightlight: "night light off",
-        "jarvis-mute": "Jarvis muted",
-        "jarvis-listen": "wake word paused"
+        voice: "voice control paused"
     })
 
     property double now: Date.now()

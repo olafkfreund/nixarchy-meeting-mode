@@ -1,14 +1,14 @@
 .pragma library
 
 // Settings live in this plugin's entry of ~/.config/omarchy/shell.json
-// ("plugins": [{ "id": "io.github.jburchel.meeting-mode", ... }]).
+// ("plugins": [{ "id": "nixarchy.meeting-mode", ... }]).
 // normalize() turns whatever is there into a complete, valid set.
 
 var DEFAULTS = {
     dnd: true,              // Do Not Disturb during the call
     awake: true,            // no idle lock or screen blank
     nightlight: true,       // night light off, so the camera isn't tinted
-    jarvis: true,           // mute the Jarvis voice assistant, if installed
+    voice: true,            // pause nixarchy voice control, if it is running
     pauseMedia: false,      // pause music/videos that are playing, resume after
     endDelay: 15,           // seconds without a call before everything is put back
     notify: true,           // a notification when meeting mode starts and ends
@@ -43,7 +43,7 @@ function normalize(raw) {
         dnd: e.dnd !== false,
         awake: e.awake !== false,
         nightlight: e.nightlight !== false,
-        jarvis: e.jarvis !== false,
+        voice: e.voice !== false,
         pauseMedia: e.pauseMedia === true,
         endDelay: delay,
         notify: e.notify !== false,
@@ -53,17 +53,17 @@ function normalize(raw) {
     };
 }
 
-// The comma list the helper script takes: "dnd,awake,nightlight,jarvis".
+// The comma list the helper script takes: "dnd,awake,nightlight,voice".
 function actionList(values) {
     var out = [];
-    ["dnd", "awake", "nightlight", "jarvis"].forEach(function(k) {
+    ["dnd", "awake", "nightlight", "voice"].forEach(function(k) {
         if (values[k]) out.push(k);
     });
     return out.join(",");
 }
 
 // A PipeWire capture stream belongs to a call when its app name or binary
-// matches callApps. Jarvis' wake word (pw-record) and Voxtype never match.
+// matches callApps. Voice wake words (omarchy-voice records with pw-record) and Voxtype never match.
 // The caller passes only capture streams (isStream && !isSink); media.class,
 // when PipeWire reports it, must agree.
 function isCallStream(props, callApps) {

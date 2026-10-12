@@ -15,7 +15,7 @@ Item {
 
     property var shell: null
     property var manifest: null
-    readonly property string pluginId: String((root.manifest && root.manifest.id) || "io.github.jburchel.meeting-mode")
+    readonly property string pluginId: String((root.manifest && root.manifest.id) || "nixarchy.meeting-mode")
 
     property bool opened: false
     property int cursor: 0
@@ -31,7 +31,7 @@ Item {
         { key: "dnd", label: "Do Not Disturb", hint: "Silence notification pop-ups during the call", toggle: true },
         { key: "awake", label: "Stay awake", hint: "No idle lock or screen blank while you listen", toggle: true },
         { key: "nightlight", label: "Night light off", hint: "Keep your camera picture its true colour", toggle: true },
-        { key: "jarvis", label: "Pause Jarvis", hint: "Mute the Jarvis voice assistant and its wake word, if installed", toggle: true },
+        { key: "voice", label: "Pause voice control", hint: "Stop nixarchy voice, wake word included, during the call, if it is running", toggle: true },
         { key: "pauseMedia", label: "Pause music and videos", hint: "Pauses what is playing and resumes it after the call", toggle: true },
         { key: "notify", label: "Notifications", hint: "Say when meeting mode starts and ends", toggle: true },
         { key: "endDelay", label: "After a call ends", hint: "Wait this long before putting everything back", options: SettingsModel.END_DELAY_OPTIONS }

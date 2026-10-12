@@ -1,4 +1,4 @@
-# Meeting Mode for Omarchy
+# Meeting Mode for nixarchy
 
 **Join a call and your desktop goes quiet by itself. Hang up and everything comes back.**
 
@@ -8,6 +8,8 @@ as an app) and gets your desktop out of the way until the call is over.
 
 ![Meeting Mode: the bar indicator lights up during a call, with the settings panel](preview.png)
 
+The screenshots still show the old "Pause Jarvis" label.
+
 ## What happens when a call starts
 
 | | During the call | After you hang up |
@@ -15,8 +17,11 @@ as an app) and gets your desktop out of the way until the call is over.
 | **Do Not Disturb** | Notification pop-ups stay silent | Back on, if they were on before |
 | **Stay awake** | No idle lock or screen blank while you listen | Normal idle behaviour returns |
 | **Night light** | Off, so your camera picture isn't tinted orange | Back to the exact temperature it had |
-| **Jarvis** voice assistant | Muted, and its wake word stops listening | Talking and listening again |
+| **Voice control** (nixarchy voice) | Stopped, wake word included | Started again, if it was running |
 | **Music and videos** *(optional)* | Paused | Resumed where they left off |
+
+The voice service takes its usual warm-up after the call, and a daemon started by hand with
+`omarchy-voice run` is not paused.
 
 Meeting Mode only undoes what it changed. If Do Not Disturb or Stay Awake was already on
 before the call, it stays on afterwards. It keeps a record of its changes on disk, so even a
@@ -29,17 +34,41 @@ been going and what was changed.
 ## Install
 
 Review the source first. Like every Omarchy plugin, it runs unsandboxed inside
-`omarchy-shell`. Then:
+`omarchy-shell`.
+
+**NixOS module** (nixarchy). Add the flake input, import the module and switch it on:
+
+```nix
+# flake.nix
+inputs.meeting-mode.url = "github:olafkfreund/nixarchy-meeting-mode";
+
+# a NixOS module
+imports = [ inputs.meeting-mode.nixosModules.default ];
+programs.nixarchy.meetingMode.enable = true;
+```
+
+The NixOS module adds the plugin for every Home Manager user, so each one needs nixarchy's
+Home Manager module: the installer's `home-manager.sharedModules` already includes it. If you
+import nixarchy per user instead, use the Home Manager route for those users.
+
+Home Manager users without the NixOS module: `imports = [ inputs.meeting-mode.homeModules.default ];`
+
+Rebuild, then enable it once in Setup → Plugins, or with
+`omarchy plugin enable nixarchy.meeting-mode --section center`.
+
+**Without the module:**
 
 ```bash
-omarchy plugin add https://github.com/jburchel/omarchy-meeting-mode.git
+omarchy plugin add https://github.com/olafkfreund/nixarchy-meeting-mode.git
 omarchy restart shell
 ```
 
-Accept the prompt to enable it and pick a bar section for the indicator (**center** is
-preselected). Move it later with `omarchy plugin enable io.github.jburchel.meeting-mode --section right`.
-The background service starts with the shell, so meeting mode works even without the
-indicator on the bar.
+This route needs `jq` on PATH; the module route builds it in. Accept the prompt to enable
+it and pick a bar section for the indicator (**center** is preselected). Move it later with
+`omarchy plugin enable nixarchy.meeting-mode --section right`. The background service starts
+with the shell, so meeting mode works even without the indicator on the bar.
+
+Settings saved under the upstream plugin id (`io.github.jburchel.meeting-mode`) are not carried over.
 
 To try it without a real call, play a few seconds of "microphone in use" from a terminal:
 
@@ -83,7 +112,7 @@ be set there:
 
 ```json
 {
-  "id": "io.github.jburchel.meeting-mode",
+  "id": "nixarchy.meeting-mode",
   "onStart": "curl -s -X POST http://homeassistant.local:8123/api/webhook/on-air",
   "onEnd": "curl -s -X POST http://homeassistant.local:8123/api/webhook/off-air",
   "callApps": "chrom|firefox|zoom|teams|slack|discord|mumble"
@@ -113,13 +142,40 @@ The call status shown in the bar (whether you are in a call, with which app, sin
 `$XDG_RUNTIME_DIR`, which only you can read; without one it stays in that private state
 directory. It is never written to `/tmp`.
 
-Recording apps that aren't call apps (OBS, Audacity, dictation tools, the Jarvis wake word)
+Recording apps that aren't call apps (OBS, Audacity, dictation tools, nixarchy voice's wake word)
 never start meeting mode.
+
+Each action checks first and changes only what needs changing. If Do Not Disturb is already
+on, or voice control isn't running, that action does nothing and nothing is recorded. When the
+call ends, only what is in the record is undone, so anything you set yourself stays as it was.
+
+Voice control is paused by stopping its user service (`omarchy-voice.service`) and starting it
+again after the call. Stopping the service frees the microphone completely, so its wake word
+can't hear the meeting. Closing the conversation would leave the wake word listening.
+
+Installed through the flake, the plugin is a plain copy of this folder with `jq` built into
+the helper's PATH. The NixOS module hands it to nixarchy's own plugin option
+(`programs.nixarchy.plugins`) through Home Manager's `sharedModules`. nixarchy checks the
+manifest when you rebuild and links the plugin into `~/.config/omarchy/plugins/`.
+
+## Limits
+
+- **Voice started by hand:** a voice daemon you started with `omarchy-voice run`, rather than
+  the service, is not paused.
+- **Things you change during the call:** the record is made when meeting mode starts.
+  - If you stop the voice service yourself during a call, it is started again afterwards.
+  - If you turn Stay Awake on yourself during a call, it is turned off afterwards.
+- **Home Manager switch during a call:** running one may start the voice service again before
+  the call ends.
+- **Voice start-up time:** after the call, voice control needs its usual start-up time before
+  it answers again.
 
 ## Update
 
+With the module: `nix flake update meeting-mode`, then rebuild. Without it:
+
 ```bash
-omarchy plugin update io.github.jburchel.meeting-mode
+omarchy plugin update nixarchy.meeting-mode
 omarchy restart shell
 ```
 
@@ -127,7 +183,7 @@ omarchy restart shell
 
 ```bash
 omarchy-shell meeting-mode off
-omarchy plugin remove io.github.jburchel.meeting-mode
+omarchy plugin remove nixarchy.meeting-mode
 ```
 
 Turning it off first puts back anything a current meeting changed.
@@ -138,20 +194,16 @@ Turning it off first puts back anything a current meeting changed.
 node tests/model.test.js        # which apps count as a call, settings defaults and limits
 node tests/qml-text.test.js     # app names are always shown as plain text
 bash tests/actions.test.sh      # on/off undoes exactly what changed (uses stand-in commands)
+nix flake check                 # all of the above, plus shellcheck, nixfmt and the module
 ```
 
-## More Omarchy plugins by Jim Burchel
+CI runs `nix flake check` on every pull request.
 
-- **[Jarvis](https://github.com/jburchel/omarchy-jarvis)**: a voice for the AI agent in your
-  terminal. Claude Code, Codex or Gemini CLI read their replies aloud, and "Hey Jarvis" starts
-  hands-free dictation. Meeting Mode mutes it during calls automatically.
-- **[Workspace Names & Icons](https://github.com/jburchel/omarchy-workspace-nameplates)**: give
-  every workspace a name and an icon right in the bar. Double-click to edit; the numbers stay.
-- **[Omarchy Alt-Tab](https://github.com/jburchel/omarchy-alt-tab)**: hold Alt and tap Tab
-  through live previews of your windows, like Windows and macOS.
+## Credit
 
-If Meeting Mode saved you from a notification mid-presentation, a ⭐ on GitHub helps other
-people find it.
+Meeting Mode was written by Jim Burchel
+([jburchel/omarchy-meeting-mode](https://github.com/jburchel/omarchy-meeting-mode), MIT).
+This fork packages it for nixarchy and swaps Jarvis for nixarchy voice control.
 
 ## License
 
