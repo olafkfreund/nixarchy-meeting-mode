@@ -199,6 +199,11 @@ plugin: `manifest.json`, `Service.qml`, `BarWidget.qml`, `Settings.qml`,
    creates `flake.lock` (commit it); `nix build && find result/ -type l` prints nothing;
    `grep jq result/bin/meeting-mode-actions` shows the store path;
    `nix fmt` leaves the tree unchanged.
+   Deviations (implementation): `nix fmt flake.nix module.nix`, because bare `nix fmt`
+   errors with this nixfmt; the package copies the top-level files in a `for`
+   loop from `${./.}` instead of one `cp` per file (same output, but the
+   package now rebuilds on any tracked-file change). aarch64-linux checks are
+   evaluated only on an aarch64 builder.
    Traps: `git add` before nix; `${./.}` copies the whole tracked tree
    including `intent/` etc. (fine for the check, but not in the package); the
    actions test in the sandbox needs `bash jq cat cut mkdir chmod touch rm stat`,
