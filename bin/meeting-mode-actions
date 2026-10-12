@@ -5,7 +5,7 @@
 #   meeting-mode-actions off               undo exactly what "on" changed
 #   meeting-mode-actions status            print {"active":…,"changed":[…]}
 #
-# Actions: dnd, awake, nightlight, jarvis. Each one is recorded only if it
+# Actions: dnd, awake, nightlight, voice. Each one is recorded only if it
 # actually changed something, so "off" never turns off a setting that was
 # already the way a meeting wants it (for example Stay Awake you switched on
 # yourself). The record survives a shell restart mid-call.
@@ -15,7 +15,7 @@
 set -u
 
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/meeting-mode"
-changed="$state_dir/changed"   # one line per change: dnd | awake | nightlight <temp> | jarvis-mute | jarvis-listen
+changed="$state_dir/changed"   # one line per change: dnd | awake | nightlight <temp> | voice
 active="$state_dir/active"
 
 OFF_TEMP=6500                  # omarchy-toggle-nightlight's "off" temperature
@@ -23,6 +23,7 @@ AWAKE_FLAG="$HOME/.local/state/omarchy/indicators/stay-awake"
 
 # Private: the records here (and the service's state.json when there is no
 # XDG_RUNTIME_DIR) say when you are in a call and with which app.
+# shellcheck disable=SC2174  # -m on the leaf only is intended; the chmod below covers it
 mkdir -p -m 700 "$state_dir"
 chmod 700 "$state_dir"
 
@@ -53,16 +54,13 @@ turn_on() {
     omarchy-shell -q nightlight refresh >/dev/null 2>&1
   fi
 
-  # Jarvis voice assistant (github.com/jburchel/omarchy-jarvis), when installed:
-  # stop it talking over the call and stop the wake word hearing the meeting.
-  if [[ $actions == *,jarvis,* ]] && have jarvis; then
-    if [[ ! -f "$HOME/.config/jarvis/muted" ]]; then
-      jarvis hush >/dev/null 2>&1
-      jarvis mute >/dev/null 2>&1 && record jarvis-mute
-    fi
-    if [[ "$(jarvis listen status 2>/dev/null | head -1)" == active ]]; then
-      jarvis listen stop >/dev/null 2>&1 && record jarvis-listen
-    fi
+  # nixarchy voice control (omarchy-voice), when its daemon is listening:
+  # close the wake-word gate and drop queued speech for the call.
+  if [[ $actions == *,voice,* ]] && have omarchy-voice; then
+    case "$(omarchy-voice status --json 2>/dev/null | jq -r '.status // empty' 2>/dev/null)" in
+      ""|idle|stopped|error|unconfigured) ;;
+      *) omarchy-voice listen stop >/dev/null 2>&1 && record voice ;;
+    esac
   fi
 
   touch "$active"
@@ -77,8 +75,7 @@ turn_off() {
       awake)         omarchy toggle idle allow-idle >/dev/null 2>&1 ;;
       nightlight)    hyprctl hyprsunset temperature "${arg:-4000}" >/dev/null 2>&1
                      omarchy-shell -q nightlight refresh >/dev/null 2>&1 ;;
-      jarvis-mute)   jarvis unmute >/dev/null 2>&1 ;;
-      jarvis-listen) jarvis listen start >/dev/null 2>&1 ;;
+      voice)         omarchy-voice listen start >/dev/null 2>&1 ;;
     esac
   done <"$changed"
   rm -f "$active" "$changed"
@@ -94,5 +91,5 @@ case "${1:-status}" in
   on)     turn_on "${2:-}"; status ;;
   off)    turn_off; status ;;
   status) status ;;
-  *) echo "usage: meeting-mode-actions on <dnd,awake,nightlight,jarvis> | off | status" >&2; exit 2 ;;
+  *) echo "usage: meeting-mode-actions on <dnd,awake,nightlight,voice> | off | status" >&2; exit 2 ;;
 esac
