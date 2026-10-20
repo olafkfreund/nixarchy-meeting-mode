@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons // qmllint disable import
+import qs.Commons as Commons // qmllint disable import
 import qs.Ui // qmllint disable import
 import "SettingsModel.js" as SettingsModel
 
@@ -106,7 +107,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            color: Color.menu.scrim
+            color: Commons.Color.menu.scrim
         }
 
         MouseArea {
@@ -120,8 +121,8 @@ Item {
             width: Style.space(620)
             height: body.implicitHeight + card.contentTopInset + card.contentBottomInset
             radius: Style.cornerRadius
-            color: Color.menu.background
-            borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+            color: Commons.Color.menu.background
+            borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
             padding: Style.spacing.panelPadding
 
             MouseArea { anchors.fill: parent }
@@ -160,7 +161,7 @@ Item {
                 Text {
                     textFormat: Text.PlainText
                     text: "Meeting Mode"
-                    color: Color.menu.text
+                    color: Commons.Color.menu.text
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.heading
                     font.bold: true
@@ -170,7 +171,7 @@ Item {
                     width: parent.width
                     wrapMode: Text.Wrap
                     text: root.statusLine
-                    color: root.state.active ? Color.urgent : Color.menu.text
+                    color: root.state.active ? Commons.Color.urgent : Commons.Color.menu.text
                     opacity: root.state.active ? 1 : 0.65
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.bodySmall
@@ -188,7 +189,7 @@ Item {
                         width: body.width
                         height: rowContent.implicitHeight + Style.spacing.lg * 2
                         radius: Style.cornerRadius
-                        color: current ? Color.menu.selectedBackground : "transparent"
+                        color: current ? Commons.Color.menu.selectedBackground : "transparent"
 
                         MouseArea {
                             anchors.fill: parent
@@ -215,7 +216,7 @@ Item {
                                 Text {
                                     textFormat: Text.PlainText
                                     text: rowItem.modelData.label
-                                    color: rowItem.current ? Color.menu.selectedText : Color.menu.text
+                                    color: rowItem.current ? Commons.Color.menu.selectedText : Commons.Color.menu.text
                                     font.family: Style.font.menuFamily
                                     font.pixelSize: Style.font.body
                                 }
@@ -225,7 +226,7 @@ Item {
                                     width: parent.width
                                     wrapMode: Text.Wrap
                                     text: rowItem.modelData.hint
-                                    color: Color.menu.text
+                                    color: Commons.Color.menu.text
                                     opacity: 0.55
                                     font.family: Style.font.menuFamily
                                     font.pixelSize: Style.font.caption
@@ -267,7 +268,7 @@ Item {
                     wrapMode: Text.Wrap
                     topPadding: Style.spacing.md
                     text: "Run your own commands at the start and end of a call (on-air light, chat status): set onStart and onEnd in this plugin's entry in shell.json."
-                    color: Color.menu.text
+                    color: Commons.Color.menu.text
                     opacity: 0.55
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.caption
@@ -275,7 +276,7 @@ Item {
                 Text {
                     textFormat: Text.PlainText
                     text: "↑↓ choose   ←→ change   space toggle   esc close"
-                    color: Color.menu.text
+                    color: Commons.Color.menu.text
                     opacity: 0.45
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.caption
