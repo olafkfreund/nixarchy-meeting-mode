@@ -104,6 +104,7 @@ Item {
     }
 
     PanelWindow { // qmllint disable uncreatable-type
+        id: win
         visible: root.opened
         anchors { top: true; bottom: true; left: true; right: true }
         color: "transparent"
@@ -126,7 +127,8 @@ Item {
             id: card
             anchors.centerIn: parent
             width: Style.space(620)
-            height: body.implicitHeight + card.contentTopInset + card.contentBottomInset
+            // Never taller than the screen: the rows scroll.
+            height: Math.min(body.implicitHeight + card.contentTopInset + card.contentBottomInset, win.height - Style.space(48))
             radius: Style.cornerRadius
             color: Color.menu.background
             borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
@@ -160,11 +162,35 @@ Item {
                 }
             }
 
-            Column {
-                id: body
+            Flickable {
+                id: scroller
                 x: card.contentLeftInset
                 y: card.contentTopInset
                 width: card.width - card.contentLeftInset - card.contentRightInset
+                height: card.height - card.contentTopInset - card.contentBottomInset
+                contentWidth: width
+                contentHeight: body.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+
+                // Keep the row under the cursor in view.
+                function reveal(index) {
+                    var item = rowList.itemAt(index);
+                    if (!item) return;
+                    if (item.y < scroller.contentY)
+                        scroller.contentY = item.y;
+                    else if (item.y + item.height > scroller.contentY + scroller.height)
+                        scroller.contentY = Math.min(item.y + item.height - scroller.height, scroller.contentHeight - scroller.height);
+                }
+                Connections {
+                    target: root
+                    function onCursorChanged() { scroller.reveal(root.cursor); }
+                }
+
+            Column {
+                id: body
+                width: scroller.width
                 spacing: Style.spacing.md
 
                 Text {
@@ -188,6 +214,7 @@ Item {
                 }
 
                 Repeater {
+                    id: rowList
                     model: root.rows
 
                     Rectangle {
@@ -388,6 +415,7 @@ Item {
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.caption
                 }
+            }
             }
         }
     }

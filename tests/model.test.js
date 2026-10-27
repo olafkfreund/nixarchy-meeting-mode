@@ -139,6 +139,17 @@ test("a user-set callApps migrates", () => {
   assert.strictEqual(m("firefox-esr|mumble").browsers, "firefox-esr");
   assert.strictEqual(m("(zoom|firefox)").nativeApps, "zoom");
   assert.strictEqual(m("(zoom|firefox)").browsers, "firefox");
+  const grouped = m("(?:zoom|firefox)|obs");
+  assert.strictEqual(M.regexError("nativeApps", grouped.nativeApps), "");
+  assert.strictEqual(M.regexError("browsers", grouped.browsers), "");
+  assert.strictEqual(grouped.nativeApps, "obs");
+  assert.strictEqual(grouped.browsers, "(?:zoom|firefox)");
+  assert.strictEqual(m("[a|b]|(zoom|x)\\|y").nativeApps, "[a|b]|(zoom|x)\\|y", "classes, groups and escapes are not split");
+  const bad = m("(?:zoom|obs");
+  assert.strictEqual(bad.nativeApps, M.DEFAULTS.nativeApps);
+  assert.strictEqual(bad.browsers, M.DEFAULTS.browsers);
+  assert.strictEqual(M.classify(capture("x", ""), { nativeApps: "(", browsers: "[", meetingTitles: "" }), "", "classify never throws");
+  assert.strictEqual(M.confirmTitle(["x"], { meetingTitles: "(" }), "");
   const only = m("chrom|firefox");
   assert.strictEqual(only.browsers, "chrom|firefox");
   assert.strictEqual(only.nativeApps, M.DEFAULTS.nativeApps, "a browser-only list keeps the default call apps");

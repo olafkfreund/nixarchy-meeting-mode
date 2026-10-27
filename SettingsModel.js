@@ -48,8 +48,37 @@ function validRegex(p, flags) {
 var rxCache = {};
 function rx(src, flags) {
     var k = (flags || "") + "/" + src;
-    if (!rxCache[k]) rxCache[k] = new RegExp(src, flags);
+    if (!(k in rxCache)) {
+        try {
+            rxCache[k] = new RegExp(src, flags);
+        } catch (err) {
+            rxCache[k] = null;
+        }
+    }
     return rxCache[k];
+}
+
+// Never throws: an invalid pattern matches nothing.
+function matches(src, flags, text) {
+    var r = rx(src, flags);
+    return r !== null && r.test(text);
+}
+
+// Split on the `|` that are not inside a group, a class or an escape.
+function splitTop(src) {
+    var out = [], cur = "", depth = 0, cls = false;
+    for (var i = 0; i < src.length; i++) {
+        var c = src.charAt(i);
+        if (c === "\\" && i + 1 < src.length) { cur += c + src.charAt(++i); continue; }
+        if (cls) { if (c === "]") cls = false; }
+        else if (c === "[") cls = true;
+        else if (c === "(") depth++;
+        else if (c === ")") depth--;
+        else if (c === "|" && depth === 0) { out.push(cur); cur = ""; continue; }
+        cur += c;
+    }
+    out.push(cur);
+    return out;
 }
 
 // "" when text is a valid value for this setting, else a short reason.
@@ -76,11 +105,12 @@ function normalize(raw) {
     var native = DEFAULTS.nativeApps, browsers = DEFAULTS.browsers;
     if (apps !== OLD_CALL_APPS && e.nativeApps === undefined && e.browsers === undefined) {
         var known = new RegExp(DEFAULTS.browsers, "i");
-        var parts = apps.split("|").map(function(t) { return t.trim(); }).filter(function(t) { return t !== ""; });
+        var parts = splitTop(apps).map(function(t) { return t.trim(); }).filter(function(t) { return t !== ""; });
         var b = parts.filter(function(t) { return known.test(t); });
         var n = parts.filter(function(t) { return !known.test(t); });
-        if (n.length) native = n.join("|");
-        if (b.length) browsers = b.join("|");
+        // Each side must still be a valid pattern; otherwise it keeps its default.
+        if (n.length && validRegex(n.join("|"), "i")) native = n.join("|");
+        if (b.length && validRegex(b.join("|"), "i")) browsers = b.join("|");
     }
     if (typeof e.nativeApps === "string" && e.nativeApps.trim() !== "" && validRegex(e.nativeApps.trim(), "i")) native = e.nativeApps.trim();
     if (typeof e.browsers === "string" && e.browsers.trim() !== "" && validRegex(e.browsers.trim(), "i")) browsers = e.browsers.trim();
@@ -128,15 +158,15 @@ function isCallStream(props, callApps) {
     var cls = String(props["media.class"] || "");
     if (cls !== "" && cls.indexOf("Input") === -1) return false;
     var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
-    return rx(callApps, "i").test(who);
+    return matches(callApps, "i", who);
 }
 
 // "native" | "browser" | "" from a capture stream's properties.
 function classify(props, s) {
     if (!isCallStream(props, ".")) return "";
     var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
-    if (rx(s.nativeApps, "i").test(who)) return "native";
-    if (rx(s.browsers, "i").test(who)) return "browser";
+    if (matches(s.nativeApps, "i", who)) return "native";
+    if (matches(s.browsers, "i", who)) return "browser";
     return "";
 }
 
@@ -145,7 +175,7 @@ function confirmTitle(titles, s) {
     var pats = String(s.meetingTitles).split("\n").filter(function(l) { return l !== "" && validRegex(l); });
     for (var i = 0; i < (titles || []).length; i++)
         for (var j = 0; j < pats.length; j++)
-            if (rx(pats[j]).test(String(titles[i]))) return String(titles[i]);
+            if (matches(pats[j], "", String(titles[i]))) return String(titles[i]);
     return "";
 }
 

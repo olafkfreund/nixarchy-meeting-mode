@@ -96,3 +96,10 @@ None yet.
   in a module memo (not in `normalize()` output, which is persisted). An
   explicit empty `meetingTitles` turns title confirmation off. The number
   field has no Escape handler.
+- **Review fixes (Codex):** the legacy `callApps` migration splits only
+  on top-level `|` and validates each side (invalid → default); regex
+  compile failures are cached as no-match, so detection never throws. A
+  legacy value that is one group, like `(?:zoom|firefox)`, stays whole and
+  lands in `browsers` (zoom then counts as a browser tier app); this is
+  rare and documented here only. The Settings card is capped to the
+  screen height and scrolls, revealing the focused row.
