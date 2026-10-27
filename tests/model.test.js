@@ -69,6 +69,60 @@ test("app name for messages", () => {
   assert.strictEqual(M.callAppName({}), "a call app");
 });
 
+test("classify native, browser, nothing", () => {
+  for (const [app, bin] of [["vesktop", "vesktop"], ["CiscoCollabHost", ""], ["ZOOM VoiceEngine", "zoom"], ["teams-for-linux", ""]])
+    assert.strictEqual(M.classify(capture(app, bin), D), "native", app);
+  for (const [app, bin] of [["Google Chrome", "chrome"], ["Firefox", "firefox"], ["", "zen-bin"], ["Zen", "zen"]])
+    assert.strictEqual(M.classify(capture(app, bin), D), "browser", app);
+  for (const [app, bin] of [["pw-record", ""], ["voxtype", "voxtype"], ["", ""]])
+    assert.strictEqual(M.classify(capture(app, bin), D), "", app);
+  assert.strictEqual(M.classify({ "media.class": "Stream/Output/Audio", "application.name": "Zoom" }, D), "");
+  assert.strictEqual(M.classify(null, D), "");
+});
+
+test("title confirmers", () => {
+  const yes = ["Meet - abc-defg-hij - Google Chrome", "Standup | Microsoft Teams", "Zoom Meeting", "Zoom", "Zoom Workplace",
+               "Jitsi Meet", "#team Huddle", "Webex", "Messenger call", "WhatsApp video call"];
+  const no = ["Meet - Google Chrome", "Meet - abcd-efg-hij", "Microsoft Teams chat", "My Zoomer notes", "Hudd", "Webinar",
+              "Messenger", "WhatsApp Web", "Inbox"];
+  for (const t of yes) assert.strictEqual(M.confirmTitle(["Inbox", t], D), t, t);
+  for (const t of no) assert.strictEqual(M.confirmTitle([t], D), "", t);
+  assert.strictEqual(M.confirmTitle([], D), "");
+  const v = M.normalize({ meetingTitles: "(bad\n^Standup$" });
+  assert.strictEqual(M.confirmTitle(["Standup"], v), "Standup", "invalid lines are dropped");
+});
+
+test("decide tiers and boundaries", () => {
+  const d = (kind, heldMs, confirmed, title) => M.decide({ kind, heldMs, confirmed, title }, D).call;
+  assert.strictEqual(d("native", 2999), "none");
+  assert.strictEqual(d("native", 3000), "call");
+  assert.strictEqual(d("browser", 2999, true), "none");
+  assert.strictEqual(d("browser", 3000), "maybe");
+  assert.strictEqual(d("browser", 3000, true), "call");
+  assert.strictEqual(d("browser", 59999), "maybe");
+  assert.strictEqual(d("browser", 60000), "call");
+  assert.strictEqual(d("", 999999, true), "none");
+  assert.strictEqual(M.decide({ kind: "browser", heldMs: 5000, confirmed: true, title: "Zoom" }, D).title, "Zoom");
+  assert.strictEqual(M.decide({ kind: "browser", heldMs: 10000 }, M.normalize({ maybeDelay: 10 })).call, "call");
+});
+
+test("maybeDelay is clamped", () => {
+  assert.strictEqual(D.maybeDelay, 60);
+  assert.strictEqual(M.normalize({ maybeDelay: 1 }).maybeDelay, 10);
+  assert.strictEqual(M.normalize({ maybeDelay: 99999 }).maybeDelay, 600);
+  assert.strictEqual(M.normalize({ maybeDelay: "x" }).maybeDelay, 60);
+});
+
+test("a user-set callApps migrates", () => {
+  const v = M.normalize({ callApps: "mumble|firefox|obs" });
+  assert.strictEqual(v.nativeApps, "mumble|obs");
+  assert.strictEqual(v.browsers, "firefox");
+  assert.strictEqual(M.classify(capture("Mumble", ""), v), "native");
+  assert.strictEqual(M.normalize({ callApps: M.DEFAULTS.callApps }).nativeApps, M.DEFAULTS.nativeApps);
+  const own = M.normalize({ callApps: "mumble", nativeApps: "foo" });
+  assert.strictEqual(own.nativeApps, "foo", "explicit lists win");
+});
+
 test("state file is never world-readable /tmp", () => {
   assert.strictEqual(M.statePath("/run/user/1000", "", "/home/u"), "/run/user/1000/meeting-mode.json");
   assert.strictEqual(M.statePath("", "", "/home/u"), "/home/u/.local/state/meeting-mode/state.json");

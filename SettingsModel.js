@@ -13,6 +13,11 @@ var DEFAULTS = {
     endDelay: 15,           // seconds without a call before everything is put back
     notify: true,           // a notification when meeting mode starts and ends
     callApps: "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element",
+    nativeApps: "zoom|teams-for-linux|teams|discord|vesktop|slack|signal|webex|CiscoCollabHost|element|skype|jitsi|telegram",
+    browsers: "chrom|firefox|brave|vivaldi|zen|librewolf|edge",
+    // one regex per line, matched (case-sensitive) against window titles
+    meetingTitles: "^Meet - [a-z]{3}-[a-z]{4}-[a-z]{3}\n\\| Microsoft Teams\n^Zoom( Meeting| Workplace)?\nJitsi Meet\nHuddle\nWebex\nMessenger call\nWhatsApp.*[Cc]all",
+    maybeDelay: 60,         // seconds a browser mic counts as "maybe" before it is a call
     onStart: "",            // optional shell command run when a meeting starts
     onEnd: ""               // optional shell command run when it ends
 };
@@ -29,6 +34,17 @@ var END_DELAY_OPTIONS = [
 // notification of the call is already silenced.
 var START_AFTER = 3;
 
+var OLD_CALL_APPS = "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element";
+
+function validRegex(p, flags) {
+    try {
+        new RegExp(p, flags);
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
 function normalize(raw) {
     var e = raw && typeof raw === "object" ? raw : {};
     var delay = Number(e.endDelay);
@@ -39,7 +55,29 @@ function normalize(raw) {
     } catch (err) {
         apps = DEFAULTS.callApps;
     }
+    // A callApps the user changed is split into the two new lists, unless
+    // they set those lists themselves.
+    var native = DEFAULTS.nativeApps, browsers = DEFAULTS.browsers;
+    if (apps !== DEFAULTS.callApps && apps !== OLD_CALL_APPS && e.nativeApps === undefined && e.browsers === undefined) {
+        var known = DEFAULTS.browsers.split("|");
+        var parts = apps.split("|");
+        var b = parts.filter(function(t) { return known.indexOf(t.toLowerCase()) !== -1; });
+        var n = parts.filter(function(t) { return known.indexOf(t.toLowerCase()) === -1 && t !== ""; });
+        if (n.length) native = n.join("|");
+        if (b.length) browsers = b.join("|");
+    }
+    if (typeof e.nativeApps === "string" && e.nativeApps.trim() !== "" && validRegex(e.nativeApps.trim(), "i")) native = e.nativeApps.trim();
+    if (typeof e.browsers === "string" && e.browsers.trim() !== "" && validRegex(e.browsers.trim(), "i")) browsers = e.browsers.trim();
+    var titles = typeof e.meetingTitles === "string"
+        ? e.meetingTitles.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l !== "" && validRegex(l); }).join("\n")
+        : "";
+    var maybe = Number(e.maybeDelay);
+    maybe = isFinite(maybe) && e.maybeDelay !== "" && e.maybeDelay !== null ? Math.max(10, Math.min(600, Math.round(maybe))) : DEFAULTS.maybeDelay;
     return {
+        nativeApps: native,
+        browsers: browsers,
+        meetingTitles: titles !== "" ? titles : DEFAULTS.meetingTitles,
+        maybeDelay: maybe,
         dnd: e.dnd !== false,
         awake: e.awake !== false,
         nightlight: e.nightlight !== false,
@@ -74,6 +112,35 @@ function isCallStream(props, callApps) {
     return new RegExp(callApps, "i").test(who);
 }
 
+// "native" | "browser" | "" from a capture stream's properties.
+function classify(props, s) {
+    if (!isCallStream(props, ".")) return "";
+    var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
+    if (new RegExp(s.nativeApps, "i").test(who)) return "native";
+    if (new RegExp(s.browsers, "i").test(who)) return "browser";
+    return "";
+}
+
+// The first window title that matches a meetingTitles pattern, or "".
+function confirmTitle(titles, s) {
+    var pats = String(s.meetingTitles).split("\n").filter(function(l) { return l !== "" && validRegex(l); });
+    for (var i = 0; i < (titles || []).length; i++)
+        for (var j = 0; j < pats.length; j++)
+            if (new RegExp(pats[j]).test(String(titles[i]))) return String(titles[i]);
+    return "";
+}
+
+// How sure we are that a held mic stream is a call.
+function decide(x, s) {
+    var title = x.title || "";
+    var held = x.heldMs >= START_AFTER * 1000;
+    var call = "none";
+    if (x.kind === "native" && held) call = "call";
+    else if (x.kind === "browser" && held)
+        call = x.confirmed || x.heldMs >= s.maybeDelay * 1000 ? "call" : "maybe";
+    return { call: call, title: title };
+}
+
 function callAppName(props) {
     var name = String((props && (props["application.name"] || props["application.process.binary"])) || "");
     return name !== "" ? name : "a call app";
@@ -106,6 +173,9 @@ if (typeof module !== "undefined")
         normalize: normalize,
         actionList: actionList,
         isCallStream: isCallStream,
+        classify: classify,
+        confirmTitle: confirmTitle,
+        decide: decide,
         callAppName: callAppName,
         statePath: statePath,
         entryFromConfig: entryFromConfig
