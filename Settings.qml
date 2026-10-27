@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QQC
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -35,7 +36,11 @@ Item {
         { key: "voice", label: "Pause voice control", hint: "Stop nixarchy voice, wake word included, during the call, if it is running", toggle: true },
         { key: "pauseMedia", label: "Pause music and videos", hint: "Pauses what is playing and resumes it after the call", toggle: true },
         { key: "notify", label: "Notifications", hint: "Say when meeting mode starts and ends", toggle: true },
-        { key: "endDelay", label: "After a call ends", hint: "Wait this long before putting everything back", options: SettingsModel.END_DELAY_OPTIONS }
+        { key: "endDelay", label: "After a call ends", hint: "Wait this long before putting everything back", options: SettingsModel.END_DELAY_OPTIONS },
+        { key: "nativeApps", label: "Call apps", hint: "Apps that count as a call as soon as they use the microphone (regular expression, matched against the app name)", text: true },
+        { key: "browsers", label: "Browsers", hint: "A browser on the microphone is only a maybe until a meeting window or screen share confirms it, or the delay below passes", text: true },
+        { key: "meetingTitles", label: "Meeting window titles", hint: "One regular expression per line, matched against window titles. Titles are never logged. Empty means no title confirmation.", text: true, multiline: true },
+        { key: "maybeDelay", label: "Treat browser mic as a call after (s)", hint: "10 to 600 seconds", text: true, number: true }
     ]
 
     readonly property string statusLine: {
@@ -64,14 +69,17 @@ Item {
 
     function valueFor(row) {
         var v = store.values[row.key];
-        return row.key === "endDelay" ? String(v) : v;
+        return row.key === "endDelay" || row.number ? String(v) : v;
     }
 
     function apply(row, value) {
-        store.set(row.key, row.key === "endDelay" ? Number(value) : value);
+        store.set(row.key, row.key === "endDelay" || row.number ? Number(value) : value);
     }
 
+    signal edit(int index)
+
     function shift(row, delta) {
+        if (row.text) return;
         if (row.toggle) {
             store.set(row.key, !store.values[row.key]);
             return;
@@ -97,6 +105,7 @@ Item {
     }
 
     PanelWindow { // qmllint disable uncreatable-type
+        id: win
         visible: root.opened
         anchors { top: true; bottom: true; left: true; right: true }
         color: "transparent"
@@ -119,7 +128,8 @@ Item {
             id: card
             anchors.centerIn: parent
             width: Style.space(620)
-            height: body.implicitHeight + card.contentTopInset + card.contentBottomInset
+            // Never taller than the screen: the rows scroll.
+            height: Math.min(body.implicitHeight + card.contentTopInset + card.contentBottomInset, win.height - Style.space(48))
             radius: Style.cornerRadius
             color: Commons.Color.menu.background
             borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
@@ -143,6 +153,8 @@ Item {
                         root.shift(row, 1);
                     else if (event.key === Qt.Key_Left || event.key === Qt.Key_H)
                         root.shift(row, -1);
+                    else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && row.text)
+                        root.edit(root.cursor);
                     else if ((event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && row.toggle)
                         root.shift(row, 1);
                     else
@@ -151,11 +163,35 @@ Item {
                 }
             }
 
-            Column {
-                id: body
+            Flickable {
+                id: scroller
                 x: card.contentLeftInset
                 y: card.contentTopInset
                 width: card.width - card.contentLeftInset - card.contentRightInset
+                height: card.height - card.contentTopInset - card.contentBottomInset
+                contentWidth: width
+                contentHeight: body.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+
+                // Keep the row under the cursor in view.
+                function reveal(index) {
+                    var item = rowList.itemAt(index);
+                    if (!item) return;
+                    if (item.y < scroller.contentY)
+                        scroller.contentY = item.y;
+                    else if (item.y + item.height > scroller.contentY + scroller.height)
+                        scroller.contentY = Math.min(item.y + item.height - scroller.height, scroller.contentHeight - scroller.height);
+                }
+                Connections {
+                    target: root
+                    function onCursorChanged() { scroller.reveal(root.cursor); }
+                }
+
+            Column {
+                id: body
+                width: scroller.width
                 spacing: Style.spacing.md
 
                 Text {
@@ -179,6 +215,7 @@ Item {
                 }
 
                 Repeater {
+                    id: rowList
                     model: root.rows
 
                     Rectangle {
@@ -186,6 +223,15 @@ Item {
                         required property var modelData
                         required property int index
                         readonly property bool current: index === root.cursor
+                        property string error: ""   // why the last edit was not saved
+
+                        // Saves unless the text is not a valid pattern; then the
+                        // previous value stays and the reason shows under the field.
+                        function commit(text) {
+                            rowItem.error = SettingsModel.regexError(rowItem.modelData.key, text);
+                            if (rowItem.error === "")
+                                root.apply(rowItem.modelData, text);
+                        }
                         width: body.width
                         height: rowContent.implicitHeight + Style.spacing.lg * 2
                         radius: Style.cornerRadius
@@ -203,14 +249,15 @@ Item {
                             x: Style.spacing.rowPaddingX
                             width: parent.width - Style.spacing.rowPaddingX * 2
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitHeight: Math.max(labels.implicitHeight, control.height)
+                            implicitHeight: rowItem.modelData.text ? labels.implicitHeight + Style.spacing.md + editor.height + (rowItem.error !== "" ? errorText.implicitHeight + Style.spacing.md : 0) : Math.max(labels.implicitHeight, control.height)
 
                             Column {
                                 id: labels
                                 anchors.left: parent.left
-                                anchors.right: control.left
-                                anchors.rightMargin: Style.spacing.huge
-                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.right: rowItem.modelData.text ? parent.right : control.left
+                                anchors.rightMargin: rowItem.modelData.text ? 0 : Style.spacing.huge
+                                anchors.top: rowItem.modelData.text ? parent.top : undefined
+                                anchors.verticalCenter: rowItem.modelData.text ? undefined : parent.verticalCenter
                                 spacing: Style.spacing.xxs
 
                                 Text {
@@ -237,12 +284,12 @@ Item {
                                 id: control
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: rowItem.modelData.toggle ? toggle.width : group.width
-                                height: rowItem.modelData.toggle ? toggle.height : group.height
+                                width: rowItem.modelData.text ? 0 : (rowItem.modelData.toggle ? toggle.width : group.width)
+                                height: rowItem.modelData.text ? 0 : (rowItem.modelData.toggle ? toggle.height : group.height)
 
                                 ButtonGroup {
                                     id: group
-                                    visible: !rowItem.modelData.toggle
+                                    visible: !rowItem.modelData.toggle && !rowItem.modelData.text
                                     focusable: false
                                     options: rowItem.modelData.options || []
                                     value: String(root.valueFor(rowItem.modelData))
@@ -257,6 +304,94 @@ Item {
                                     hasCursor: rowItem.current
                                     onToggled: root.shift(rowItem.modelData, 1)
                                 }
+                            }
+
+                            // Saved when the field loses focus; Escape leaves the field.
+                            Item {
+                                id: editor
+                                visible: !!rowItem.modelData.text
+                                anchors.top: labels.bottom
+                                anchors.topMargin: Style.spacing.md
+                                width: parent.width
+                                height: rowItem.modelData.multiline ? Style.space(110) : (rowItem.modelData.number ? numberField.implicitHeight : singleField.implicitHeight)
+
+                                Connections {
+                                    target: root
+                                    function onEdit(i) {
+                                        if (i !== rowItem.index) return;
+                                        if (rowItem.modelData.multiline) area.forceActiveFocus();
+                                        else if (rowItem.modelData.number) numberField.field.forceActiveFocus();
+                                        else singleField.forceActiveFocus();
+                                    }
+                                }
+
+                                TextField {
+                                    id: singleField
+                                    visible: !rowItem.modelData.multiline && !rowItem.modelData.number
+                                    width: parent.width
+                                    text: String(root.valueFor(rowItem.modelData))
+                                    foreground: Commons.Color.menu.text
+                                    font.family: Style.font.menuFamily
+                                    font.pixelSize: Style.font.bodySmall
+                                    onActiveFocusChanged: if (activeFocus) root.cursor = rowItem.index
+                                    onEditingFinished: rowItem.commit(text)
+                                    Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+                                }
+                                // The shown value is the saved, clamped one.
+                                NumberField {
+                                    id: numberField
+                                    visible: !!rowItem.modelData.number
+                                    from: 10
+                                    to: 600
+                                    value: Number(root.valueFor(rowItem.modelData))
+                                    foreground: Commons.Color.menu.text
+                                    fontFamily: Style.font.menuFamily
+                                    fontSize: Style.font.bodySmall
+                                    hasCursor: rowItem.current
+                                    onModified: function(v) { root.apply(rowItem.modelData, v); }
+                                }
+                                QQC.ScrollView {
+                                    visible: !!rowItem.modelData.multiline
+                                    anchors.fill: parent
+                                    QQC.TextArea {
+                                        id: area
+                                        text: String(root.valueFor(rowItem.modelData))
+                                        color: Commons.Color.menu.text
+                                        font.family: Style.font.menuFamily
+                                        font.pixelSize: Style.font.bodySmall
+                                        wrapMode: TextEdit.NoWrap
+                                        leftPadding: Style.spacing.controlPaddingX
+                                        rightPadding: Style.spacing.controlPaddingX
+                                        topPadding: Style.spacing.inputPaddingY
+                                        bottomPadding: Style.spacing.inputPaddingY
+                                        selectionColor: Style.selectionFillFor(Commons.Color.menu.text, Commons.Color.accent)
+                                        selectedTextColor: Commons.Color.menu.text
+                                        background: BorderSurface {
+                                            color: Style.controlFill(area.activeFocus, false, Commons.Color.menu.text, Commons.Color.accent)
+                                            borderSpec: Border.controlSpec(area.activeFocus ? "focus" : "normal", Commons.Color.menu.text, Commons.Color.accent)
+                                            radius: Style.cornerRadius
+                                        }
+                                        onActiveFocusChanged: {
+                                            if (activeFocus) root.cursor = rowItem.index;
+                                            else rowItem.commit(text);
+                                        }
+                                        Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+                                    }
+                                }
+                            }
+
+                            Text {
+                                id: errorText
+                                textFormat: Text.PlainText
+                                visible: rowItem.error !== ""
+                                anchors.top: editor.bottom
+                                anchors.topMargin: Style.spacing.md
+                                width: parent.width
+                                wrapMode: Text.Wrap
+                                text: rowItem.error
+                                color: Commons.Color.urgent
+                                font.family: Style.font.menuFamily
+                                font.pixelSize: Style.font.caption
                             }
                         }
                     }
@@ -275,12 +410,13 @@ Item {
                 }
                 Text {
                     textFormat: Text.PlainText
-                    text: "↑↓ choose   ←→ change   space toggle   esc close"
+                    text: "↑↓ choose   ←→ change   space toggle   enter edit text   esc close"
                     color: Commons.Color.menu.text
                     opacity: 0.45
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.caption
                 }
+            }
             }
         }
     }

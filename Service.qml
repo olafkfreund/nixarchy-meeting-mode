@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
@@ -43,18 +44,115 @@ Item {
         }
         return list;
     }
-    PwObjectTracker { objects: root.captureStreams }
+    readonly property var videoSources: {
+        var list = [];
+        for (var i = 0; i < nodes.length; i++)
+            if (nodes[i] && nodes[i].type === PwNodeType.VideoSource)
+                list.push(nodes[i]);
+        return list;
+    }
+    PwObjectTracker { objects: root.captureStreams.concat(root.videoSources) }
 
-    readonly property var callStream: {
+    // Capture streams of a call app, each with its kind (native | browser).
+    readonly property var qualifying: {
+        var out = [];
         for (var i = 0; i < captureStreams.length; i++) {
             var n = captureStreams[i];
-            if (n.ready && SettingsModel.isCallStream(n.properties, root.settings.callApps))
-                return n;
+            if (!n.ready) continue;
+            var kind = SettingsModel.classify(n.properties, root.settings);
+            if (kind !== "")
+                out.push({ id: n.id, kind: kind, app: SettingsModel.callAppName(n.properties) });
         }
-        return null;
+        return out;
     }
-    readonly property bool callDetected: callStream !== null
-    readonly property string callApp: callStream ? SettingsModel.callAppName(callStream.properties) : ""
+    // An xdph screen share is a Video/Source named xdph-streaming-*.
+    readonly property bool screenShared: {
+        for (var i = 0; i < videoSources.length; i++) {
+            var p = videoSources[i].ready ? videoSources[i].properties : null;
+            if (p && p["media.class"] === "Video/Source" && String(p["media.name"] || "").indexOf("xdph-streaming-") === 0)
+                return true;
+        }
+        return false;
+    }
+    // Titles of browser windows only, kept in memory; never logged or notified.
+    readonly property var titles: {
+        var out = [];
+        var tl = Hyprland.toplevels ? Hyprland.toplevels.values : [];
+        var browsers = new RegExp(root.settings.browsers, "i");
+        for (var i = 0; i < tl.length; i++) {
+            if (!tl[i]) continue;
+            var cls = tl[i].wayland && tl[i].wayland.appId ? tl[i].wayland.appId : (tl[i].lastIpcObject ? tl[i].lastIpcObject["class"] : "");
+            if (browsers.test(String(cls || "")))
+                out.push(String(tl[i].title || ""));
+        }
+        return out;
+    }
+
+    property var heldAt: ({})          // stream id -> when we first saw it
+    property var confirmedIds: ({})    // stream ids that have been a call: they stay one
+    property string call: "none"       // none | maybe | call
+    property string callApp: ""
+    property string callTitle: ""
+    property double callSince: 0
+    readonly property bool callDetected: call === "call"
+
+    onQualifyingChanged: recompute()
+    onTitlesChanged: recompute()
+    onScreenSharedChanged: recompute()
+    onSettingsChanged: recompute()
+
+    // The 1 s tick exists only for the 3 s and maybeDelay thresholds.
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.qualifying.length > 0
+        onTriggered: root.recompute()
+    }
+
+    function recompute() {
+        var q = root.qualifying;
+        var best = { call: "none", app: "", title: "" };
+        if (q.length === 0) {
+            root.heldAt = {};
+            root.confirmedIds = {};
+        } else {
+            var now = Date.now();
+            var held = {};
+            var sure = {};
+            for (var i = 0; i < q.length; i++) {
+                held[q[i].id] = root.heldAt[q[i].id] || now;
+                if (root.confirmedIds[q[i].id]) sure[q[i].id] = true;
+            }
+            var title = SettingsModel.confirmTitle(root.titles, root.settings);
+            var confirmed = title !== "" || root.screenShared;
+            var rank = { none: 0, maybe: 1, call: 2 };
+            for (var j = 0; j < q.length; j++) {
+                var d = SettingsModel.decide({ kind: q[j].kind, heldMs: now - held[q[j].id], confirmed: confirmed, title: title }, root.settings);
+                // A stream that has been a call stays one while it exists, so a
+                // tab switch does not end the meeting.
+                if (d.call === "call") sure[q[j].id] = true;
+                else if (sure[q[j].id]) d = { call: "call", title: "" };
+                if (rank[d.call] > rank[best.call])
+                    best = { call: d.call, app: q[j].app, title: d.title };
+            }
+            root.heldAt = held;
+            root.confirmedIds = sure;
+        }
+        if (best.call === "none") root.callSince = 0;
+        else if (root.call === "none") root.callSince = Date.now();
+        root.callApp = best.app;
+        root.callTitle = best.title;
+        root.call = best.call;
+    }
+
+    onCallChanged: {
+        if (root.call === "none")
+            root.suppressed = false;
+        root.evaluate();
+        root.writeState();
+    }
+    onCallAppChanged: root.writeState()
+    onCallTitleChanged: root.writeState()
 
     // --- state ---------------------------------------------------------------
     property bool active: false        // the actions are applied
@@ -65,34 +163,25 @@ Item {
     property double since: 0
     property var pausedPlayers: []     // MPRIS players paused by us, resumed afterwards
 
-    onCallDetectedChanged: {
-        if (!root.callDetected)
-            root.suppressed = false;
-        root.evaluate();
-    }
+    onActiveChanged: root.writeState()
 
     function evaluate() {
         var auto = root.callDetected && !root.suppressed;
+        // decide() already waited out the 3 s hold.
         if (auto && !root.active && !root.busy)
-            startTimer.restart();
-        else if (!auto)
-            startTimer.stop();
+            root.start(root.callApp);
 
-        if (root.active && !root.forcedOn && !root.callDetected)
+        // A maybe (a browser mic not yet confirmed) keeps a running meeting going.
+        if (root.active && !root.forcedOn && root.call === "none")
             endTimer.restart();
         else
             endTimer.stop();
     }
 
     Timer {
-        id: startTimer
-        interval: SettingsModel.START_AFTER * 1000
-        onTriggered: if (root.callDetected && !root.suppressed && !root.active) root.start(root.callApp)
-    }
-    Timer {
         id: endTimer
         interval: root.settings.endDelay * 1000
-        onTriggered: if (!root.callDetected && !root.forcedOn && root.active) root.stop()
+        onTriggered: if (root.call === "none" && !root.forcedOn && root.active) root.stop()
     }
 
     // --- applying and undoing ------------------------------------------------
@@ -175,14 +264,41 @@ Item {
         if (root.settings.pauseMedia)
             root.pauseMedia();
         root.hook(root.settings.onStart);
-        root.runHelper(["on", SettingsModel.actionList(root.settings)], function() { root.writeState(); });
+        // The meetingai plugin may offer to take notes; that goes first so DND
+        // does not swallow it. It reports "Target not found" and exits when
+        // meetingai is not installed; the timer covers an offer that hangs.
+        root.pendingOn = true;
+        offerProc.running = true;
+        offerTimer.restart();
         root.writeState();
+    }
+
+    property bool pendingOn: false
+
+    function beginOn() {
+        if (!root.pendingOn) return;
+        root.pendingOn = false;
+        offerTimer.stop();
+        root.runHelper(["on", SettingsModel.actionList(root.settings)], function() { root.writeState(); });
+    }
+
+    Process {
+        id: offerProc
+        command: ["omarchy-shell", "meetingai", "offer"]
+        onExited: root.beginOn()
+    }
+    Timer {
+        id: offerTimer
+        interval: 1000
+        onTriggered: root.beginOn()
     }
 
     function stop() {
         if (!root.active) return;
         root.active = false;
         root.forcedOn = false;
+        root.pendingOn = false;
+        offerTimer.stop();
         root.runHelper(["off"], function() {
             if (root.pausedPlayers.length)
                 root.resumeMedia();
@@ -198,15 +314,16 @@ Item {
         root.suppressed = false;
         root.forcedOn = true;
         if (!root.active) root.start("manual");
-        else root.writeState();
         root.evaluate();
+        root.writeState();
     }
 
     function turnOff() {
-        if (root.callDetected) root.suppressed = true;
+        if (root.call !== "none") root.suppressed = true;
         root.forcedOn = false;
         root.stop();
         root.evaluate();
+        root.writeState();
     }
 
     function toggle() {
@@ -219,6 +336,7 @@ Item {
         root.suppressed = false;
         root.forcedOn = false;
         root.evaluate();
+        root.writeState();
     }
 
     // --- state for the bar widget --------------------------------------------
@@ -228,8 +346,13 @@ Item {
             forced: root.forcedOn,
             suppressed: root.suppressed,
             reason: root.reason,
+            updated: Date.now(),
+            pid: Quickshell.processId,
+            call: root.call,
             callDetected: root.callDetected,
             callApp: root.callApp,
+            callTitle: root.callTitle,
+            callSince: root.callSince,
             since: root.since,
             changed: root.changed,
             pausedMedia: root.pausedPlayers.length
@@ -240,7 +363,12 @@ Item {
     // (0700) state directory used when there is no XDG_RUNTIME_DIR.
     property bool stateReady: false
 
+    // Several properties change together: write once, after they settle.
     function writeState() {
+        Qt.callLater(root.flushState);
+    }
+
+    function flushState() {
         if (root.stateReady)
             stateOut.setText(JSON.stringify(root.stateObject()) + "\n");
     }

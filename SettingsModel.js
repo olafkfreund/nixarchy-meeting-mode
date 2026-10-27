@@ -12,7 +12,11 @@ var DEFAULTS = {
     pauseMedia: false,      // pause music/videos that are playing, resume after
     endDelay: 15,           // seconds without a call before everything is put back
     notify: true,           // a notification when meeting mode starts and ends
-    callApps: "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element",
+    nativeApps: "zoom|teams-for-linux|teams|discord|vesktop|slack|signal|webex|CiscoCollabHost|element|skype|jitsi|telegram",
+    browsers: "chrom|firefox|brave|vivaldi|zen|librewolf|edge",
+    // one regex per line, matched (case-sensitive) against window titles
+    meetingTitles: "^Meet - [a-z]{3}-[a-z]{4}-[a-z]{3}\n\\| Microsoft Teams\n^Zoom( Meeting| Workplace)?\nJitsi Meet\nHuddle\nWebex\nMessenger call\nWhatsApp.*[Cc]all",
+    maybeDelay: 60,         // seconds a browser mic counts as "maybe" before it is a call
     onStart: "",            // optional shell command run when a meeting starts
     onEnd: ""               // optional shell command run when it ends
 };
@@ -29,17 +33,101 @@ var END_DELAY_OPTIONS = [
 // notification of the call is already silenced.
 var START_AFTER = 3;
 
+var OLD_CALL_APPS = "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element";
+
+function validRegex(p, flags) {
+    try {
+        new RegExp(p, flags);
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+// Compiled patterns are cached: the service tests every stream on every tick.
+var rxCache = {};
+function rx(src, flags) {
+    var k = (flags || "") + "/" + src;
+    if (!(k in rxCache)) {
+        try {
+            rxCache[k] = new RegExp(src, flags);
+        } catch (err) {
+            rxCache[k] = null;
+        }
+    }
+    return rxCache[k];
+}
+
+// Never throws: an invalid pattern matches nothing.
+function matches(src, flags, text) {
+    var r = rx(src, flags);
+    return r !== null && r.test(text);
+}
+
+// Split on the `|` that are not inside a group, a class or an escape.
+function splitTop(src) {
+    var out = [], cur = "", depth = 0, cls = false;
+    for (var i = 0; i < src.length; i++) {
+        var c = src.charAt(i);
+        if (c === "\\" && i + 1 < src.length) { cur += c + src.charAt(++i); continue; }
+        if (cls) { if (c === "]") cls = false; }
+        else if (c === "[") cls = true;
+        else if (c === "(") depth++;
+        else if (c === ")") depth--;
+        else if (c === "|" && depth === 0) { out.push(cur); cur = ""; continue; }
+        cur += c;
+    }
+    out.push(cur);
+    return out;
+}
+
+// "" when text is a valid value for this setting, else a short reason.
+// The settings panel refuses to save anything this rejects.
+function regexError(key, text) {
+    var lines = key === "meetingTitles" ? String(text).split("\n") : [String(text)];
+    for (var i = 0; i < lines.length; i++)
+        if (lines[i].trim() !== "" && !validRegex(lines[i].trim(), key === "meetingTitles" ? "" : "i"))
+            return "Not a valid regular expression: " + lines[i].trim();
+    return "";
+}
+
 function normalize(raw) {
     var e = raw && typeof raw === "object" ? raw : {};
     var delay = Number(e.endDelay);
     delay = isFinite(delay) ? Math.max(3, Math.min(600, Math.round(delay))) : DEFAULTS.endDelay;
-    var apps = typeof e.callApps === "string" && e.callApps.trim() !== "" ? e.callApps.trim() : DEFAULTS.callApps;
-    try {
-        new RegExp(apps, "i");
-    } catch (err) {
-        apps = DEFAULTS.callApps;
+    var apps = typeof e.callApps === "string" && e.callApps.trim() !== "" ? e.callApps.trim() : OLD_CALL_APPS;
+    if (apps.charAt(0) === "(" && apps.charAt(apps.length - 1) === ")" && validRegex(apps.slice(1, -1), "i"))
+        apps = apps.slice(1, -1);
+    if (!validRegex(apps, "i"))
+        apps = OLD_CALL_APPS;
+    // A callApps the user changed is split into the two new lists, unless
+    // they set those lists themselves.
+    var native = DEFAULTS.nativeApps, browsers = DEFAULTS.browsers;
+    if (apps !== OLD_CALL_APPS && e.nativeApps === undefined && e.browsers === undefined) {
+        var known = new RegExp(DEFAULTS.browsers, "i");
+        var parts = splitTop(apps).map(function(t) { return t.trim(); }).filter(function(t) { return t !== ""; });
+        var b = parts.filter(function(t) { return known.test(t); });
+        var n = parts.filter(function(t) { return !known.test(t); });
+        // Each side must still be a valid pattern; otherwise it keeps its default.
+        if (n.length && validRegex(n.join("|"), "i")) native = n.join("|");
+        if (b.length && validRegex(b.join("|"), "i")) browsers = b.join("|");
     }
+    if (typeof e.nativeApps === "string" && e.nativeApps.trim() !== "" && validRegex(e.nativeApps.trim(), "i")) native = e.nativeApps.trim();
+    if (typeof e.browsers === "string" && e.browsers.trim() !== "" && validRegex(e.browsers.trim(), "i")) browsers = e.browsers.trim();
+    // Missing: the defaults. An empty string is a choice: no title confirmation.
+    var titles = DEFAULTS.meetingTitles;
+    if (typeof e.meetingTitles === "string") {
+        var lines = e.meetingTitles.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l !== ""; });
+        var good = lines.filter(function(l) { return validRegex(l); });
+        if (good.length || !lines.length) titles = good.join("\n");
+    }
+    var maybe = Number(e.maybeDelay);
+    maybe = isFinite(maybe) && e.maybeDelay !== "" && e.maybeDelay !== null ? Math.max(10, Math.min(600, Math.round(maybe))) : DEFAULTS.maybeDelay;
     return {
+        nativeApps: native,
+        browsers: browsers,
+        meetingTitles: titles,
+        maybeDelay: maybe,
         dnd: e.dnd !== false,
         awake: e.awake !== false,
         nightlight: e.nightlight !== false,
@@ -47,7 +135,6 @@ function normalize(raw) {
         pauseMedia: e.pauseMedia === true,
         endDelay: delay,
         notify: e.notify !== false,
-        callApps: apps,
         onStart: typeof e.onStart === "string" ? e.onStart : "",
         onEnd: typeof e.onEnd === "string" ? e.onEnd : ""
     };
@@ -71,7 +158,37 @@ function isCallStream(props, callApps) {
     var cls = String(props["media.class"] || "");
     if (cls !== "" && cls.indexOf("Input") === -1) return false;
     var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
-    return new RegExp(callApps, "i").test(who);
+    return matches(callApps, "i", who);
+}
+
+// "native" | "browser" | "" from a capture stream's properties.
+function classify(props, s) {
+    if (!isCallStream(props, ".")) return "";
+    var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
+    if (matches(s.nativeApps, "i", who)) return "native";
+    if (matches(s.browsers, "i", who)) return "browser";
+    return "";
+}
+
+// The first window title that matches a meetingTitles pattern, or "".
+function confirmTitle(titles, s) {
+    var pats = String(s.meetingTitles).split("\n").filter(function(l) { return l !== "" && validRegex(l); });
+    for (var i = 0; i < (titles || []).length; i++)
+        for (var j = 0; j < pats.length; j++)
+            if (matches(pats[j], "", String(titles[i]))) return String(titles[i]);
+    return "";
+}
+
+// How sure we are that a held mic stream is a call.
+function decide(x, s) {
+    // Only a browser call carries the title that confirmed it.
+    var title = x.kind === "browser" && x.confirmed ? x.title || "" : "";
+    var held = x.heldMs >= START_AFTER * 1000;
+    var call = "none";
+    if (x.kind === "native" && held) call = "call";
+    else if (x.kind === "browser" && held)
+        call = x.confirmed || x.heldMs >= s.maybeDelay * 1000 ? "call" : "maybe";
+    return { call: call, title: title };
 }
 
 function callAppName(props) {
@@ -104,8 +221,12 @@ if (typeof module !== "undefined")
         DEFAULTS: DEFAULTS,
         START_AFTER: START_AFTER,
         normalize: normalize,
+        regexError: regexError,
         actionList: actionList,
         isCallStream: isCallStream,
+        classify: classify,
+        confirmTitle: confirmTitle,
+        decide: decide,
         callAppName: callAppName,
         statePath: statePath,
         entryFromConfig: entryFromConfig
