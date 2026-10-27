@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: none (issues are disabled on this repo)
 author: olafkfreund
 related: olafkfreund/mixarchy-meetingai intent/2026-10-27-0-call-detection.md (approved) and its spec
