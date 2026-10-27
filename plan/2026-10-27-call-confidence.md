@@ -77,3 +77,10 @@ edit files, so one `coder` does steps 1–3; the lead commits and reviews.
 ## Deviations log (recorded with the implementation commit)
 
 None yet.
+- **Step 2:** `startTimer` removed (`decide()` already waits 3 s);
+  `PwObjectTracker` tracks all nodes (the xdph `Video/Source` node is not
+  a stream and needs tracking for its properties); `callApps` is no longer
+  returned by `normalize()` (kept only for migration). The offer hook runs
+  `omarchy-shell meetingai offer` detached, without a plugin check: the
+  IPC target simply doesn't exist when meetingai isn't installed. It is
+  asynchronous, so it is not guaranteed to land before DND.

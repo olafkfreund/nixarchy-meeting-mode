@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Services.Mpris
 import Quickshell.Services.Pipewire
@@ -43,18 +44,90 @@ Item {
         }
         return list;
     }
-    PwObjectTracker { objects: root.captureStreams }
+    // Track every node: a screen-share Video/Source is not a stream.
+    PwObjectTracker { objects: root.nodes }
 
-    readonly property var callStream: {
+    // Capture streams of a call app, each with its kind (native | browser).
+    readonly property var qualifying: {
+        var out = [];
         for (var i = 0; i < captureStreams.length; i++) {
             var n = captureStreams[i];
-            if (n.ready && SettingsModel.isCallStream(n.properties, root.settings.callApps))
-                return n;
+            if (!n.ready) continue;
+            var kind = SettingsModel.classify(n.properties, root.settings);
+            if (kind !== "")
+                out.push({ id: n.id, kind: kind, app: SettingsModel.callAppName(n.properties) });
         }
-        return null;
+        return out;
     }
-    readonly property bool callDetected: callStream !== null
-    readonly property string callApp: callStream ? SettingsModel.callAppName(callStream.properties) : ""
+    // An xdph screen share is a Video/Source named xdph-streaming-*.
+    readonly property bool screenShared: {
+        for (var i = 0; i < nodes.length; i++) {
+            var p = nodes[i] && nodes[i].ready ? nodes[i].properties : null;
+            if (p && p["media.class"] === "Video/Source" && String(p["media.name"] || "").indexOf("xdph-streaming-") === 0)
+                return true;
+        }
+        return false;
+    }
+    // Window titles stay in memory; they are never logged or notified.
+    readonly property var titles: {
+        var out = [];
+        var tl = Hyprland.toplevels ? Hyprland.toplevels.values : [];
+        for (var i = 0; i < tl.length; i++)
+            if (tl[i]) out.push(String(tl[i].title || ""));
+        return out;
+    }
+    readonly property bool sharingIndicator: {
+        for (var i = 0; i < titles.length; i++)
+            if (/(Firefox|Zen).*Sharing Indicator/.test(titles[i])) return true;
+        return false;
+    }
+
+    property var heldAt: ({})          // stream id -> when we first saw it
+    property string call: "none"       // none | maybe | call
+    property string callApp: ""
+    property string callTitle: ""
+    property double callSince: 0
+    readonly property bool callDetected: call === "call"
+
+    onQualifyingChanged: recompute()
+    onTitlesChanged: recompute()
+    onScreenSharedChanged: recompute()
+    onSettingsChanged: recompute()
+
+    // The 1 s tick exists only for the 3 s and maybeDelay thresholds.
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.qualifying.length > 0
+        onTriggered: root.recompute()
+    }
+
+    function recompute() {
+        var now = Date.now();
+        var q = root.qualifying;
+        var held = {};
+        for (var i = 0; i < q.length; i++)
+            held[q[i].id] = root.heldAt[q[i].id] || now;
+        root.heldAt = held;
+        var title = SettingsModel.confirmTitle(root.titles, root.settings);
+        var confirmed = title !== "" || root.screenShared || root.sharingIndicator;
+        var rank = { none: 0, maybe: 1, call: 2 };
+        var best = { call: "none", app: "", title: "" };
+        for (var j = 0; j < q.length; j++) {
+            var d = SettingsModel.decide({ kind: q[j].kind, heldMs: now - held[q[j].id], confirmed: confirmed, title: title }, root.settings);
+            if (rank[d.call] > rank[best.call])
+                best = { call: d.call, app: q[j].app, title: d.title };
+        }
+        if (best.call === "none") root.callSince = 0;
+        else if (root.call === "none") root.callSince = now;
+        root.callApp = best.app;
+        root.callTitle = best.title;
+        root.call = best.call;
+    }
+
+    onCallChanged: root.writeState()
+    onCallAppChanged: root.writeState()
+    onCallTitleChanged: root.writeState()
 
     // --- state ---------------------------------------------------------------
     property bool active: false        // the actions are applied
@@ -73,10 +146,9 @@ Item {
 
     function evaluate() {
         var auto = root.callDetected && !root.suppressed;
+        // decide() already waited out the 3 s hold.
         if (auto && !root.active && !root.busy)
-            startTimer.restart();
-        else if (!auto)
-            startTimer.stop();
+            root.start(root.callApp);
 
         if (root.active && !root.forcedOn && !root.callDetected)
             endTimer.restart();
@@ -84,11 +156,6 @@ Item {
             endTimer.stop();
     }
 
-    Timer {
-        id: startTimer
-        interval: SettingsModel.START_AFTER * 1000
-        onTriggered: if (root.callDetected && !root.suppressed && !root.active) root.start(root.callApp)
-    }
     Timer {
         id: endTimer
         interval: root.settings.endDelay * 1000
@@ -170,6 +237,10 @@ Item {
         root.active = true;
         root.reason = why;
         root.since = Date.now();
+        // The meetingai plugin may offer to take notes; ask before DND is on.
+        // Errors, or no meetingai plugin, are ignored.
+        // Reports "Target not found" and does nothing when meetingai is not installed.
+        Quickshell.execDetached(["sh", "-c", "omarchy-shell meetingai offer >/dev/null 2>&1; true"]);
         // Before Do Not Disturb, or it would swallow its own notification.
         root.notify("Meeting mode on", why === "manual" ? "Turned on by hand" : "Call detected in " + why);
         if (root.settings.pauseMedia)
@@ -228,8 +299,11 @@ Item {
             forced: root.forcedOn,
             suppressed: root.suppressed,
             reason: root.reason,
+            call: root.call,
             callDetected: root.callDetected,
             callApp: root.callApp,
+            callTitle: root.callTitle,
+            callSince: root.callSince,
             since: root.since,
             changed: root.changed,
             pausedMedia: root.pausedPlayers.length

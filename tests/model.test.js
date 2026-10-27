@@ -30,7 +30,7 @@ test("defaults", () => {
 test("bad values fall back", () => {
   const v = M.normalize({ endDelay: "soon", callApps: "(unclosed", dnd: "yes" });
   assert.strictEqual(v.endDelay, 15);
-  assert.strictEqual(v.callApps, M.DEFAULTS.callApps, "an invalid regex must not break detection");
+  assert.strictEqual(v.nativeApps, M.DEFAULTS.nativeApps, "an invalid regex must not break detection");
   assert.strictEqual(v.dnd, true);
   assert.strictEqual(M.normalize({ endDelay: 0 }).endDelay, 3);
   assert.strictEqual(M.normalize({ endDelay: 99999 }).endDelay, 600);
@@ -44,23 +44,23 @@ test("action list follows switches", () => {
 test("call apps are detected", () => {
   for (const [app, bin] of [["Google Chrome", "chrome"], ["Chromium", ""], ["Firefox", "firefox"], ["ZOOM VoiceEngine", "zoom"],
                             ["teams-for-linux", ""], ["Slack", "slack"], ["WEBRTC VoiceEngine", "Discord"], ["", "vivaldi-bin"]])
-    assert.ok(M.isCallStream(capture(app, bin), D.callApps), `${app}/${bin} should count as a call`);
+    assert.ok(M.isCallStream(capture(app, bin), D.nativeApps + "|" + D.browsers), `${app}/${bin} should count as a call`);
 });
 
 test("non-call capture is ignored", () => {
   for (const [app, bin] of [["pw-record", ""], ["voxtype", "voxtype"], ["OBS", "obs"], ["audacity", ""], ["", ""]])
-    assert.ok(!M.isCallStream(capture(app, bin), D.callApps), `${app}/${bin} must not start meeting mode`);
+    assert.ok(!M.isCallStream(capture(app, bin), D.nativeApps + "|" + D.browsers), `${app}/${bin} must not start meeting mode`);
 });
 
 test("playback streams never count", () => {
-  assert.ok(!M.isCallStream({ "media.class": "Stream/Output/Audio", "application.name": "Google Chrome" }, D.callApps));
-  assert.ok(!M.isCallStream(null, D.callApps));
+  assert.ok(!M.isCallStream({ "media.class": "Stream/Output/Audio", "application.name": "Google Chrome" }, D.nativeApps + "|" + D.browsers));
+  assert.ok(!M.isCallStream(null, D.nativeApps + "|" + D.browsers));
 });
 
 test("custom call apps", () => {
   const v = M.normalize({ callApps: "mumble|obs" });
-  assert.ok(M.isCallStream(capture("Mumble", ""), v.callApps));
-  assert.ok(!M.isCallStream(capture("Google Chrome", ""), v.callApps));
+  assert.ok(M.isCallStream(capture("Mumble", ""), v.nativeApps));
+  assert.ok(!M.isCallStream(capture("Google Chrome", ""), v.nativeApps));
 });
 
 test("app name for messages", () => {
@@ -118,7 +118,7 @@ test("a user-set callApps migrates", () => {
   assert.strictEqual(v.nativeApps, "mumble|obs");
   assert.strictEqual(v.browsers, "firefox");
   assert.strictEqual(M.classify(capture("Mumble", ""), v), "native");
-  assert.strictEqual(M.normalize({ callApps: M.DEFAULTS.callApps }).nativeApps, M.DEFAULTS.nativeApps);
+  assert.strictEqual(M.normalize({ callApps: "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element" }).nativeApps, M.DEFAULTS.nativeApps);
   const own = M.normalize({ callApps: "mumble", nativeApps: "foo" });
   assert.strictEqual(own.nativeApps, "foo", "explicit lists win");
 });

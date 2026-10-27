@@ -12,7 +12,6 @@ var DEFAULTS = {
     pauseMedia: false,      // pause music/videos that are playing, resume after
     endDelay: 15,           // seconds without a call before everything is put back
     notify: true,           // a notification when meeting mode starts and ends
-    callApps: "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element",
     nativeApps: "zoom|teams-for-linux|teams|discord|vesktop|slack|signal|webex|CiscoCollabHost|element|skype|jitsi|telegram",
     browsers: "chrom|firefox|brave|vivaldi|zen|librewolf|edge",
     // one regex per line, matched (case-sensitive) against window titles
@@ -49,16 +48,16 @@ function normalize(raw) {
     var e = raw && typeof raw === "object" ? raw : {};
     var delay = Number(e.endDelay);
     delay = isFinite(delay) ? Math.max(3, Math.min(600, Math.round(delay))) : DEFAULTS.endDelay;
-    var apps = typeof e.callApps === "string" && e.callApps.trim() !== "" ? e.callApps.trim() : DEFAULTS.callApps;
+    var apps = typeof e.callApps === "string" && e.callApps.trim() !== "" ? e.callApps.trim() : OLD_CALL_APPS;
     try {
         new RegExp(apps, "i");
     } catch (err) {
-        apps = DEFAULTS.callApps;
+        apps = OLD_CALL_APPS;
     }
     // A callApps the user changed is split into the two new lists, unless
     // they set those lists themselves.
     var native = DEFAULTS.nativeApps, browsers = DEFAULTS.browsers;
-    if (apps !== DEFAULTS.callApps && apps !== OLD_CALL_APPS && e.nativeApps === undefined && e.browsers === undefined) {
+    if (apps !== OLD_CALL_APPS && e.nativeApps === undefined && e.browsers === undefined) {
         var known = DEFAULTS.browsers.split("|");
         var parts = apps.split("|");
         var b = parts.filter(function(t) { return known.indexOf(t.toLowerCase()) !== -1; });
@@ -85,7 +84,6 @@ function normalize(raw) {
         pauseMedia: e.pauseMedia === true,
         endDelay: delay,
         notify: e.notify !== false,
-        callApps: apps,
         onStart: typeof e.onStart === "string" ? e.onStart : "",
         onEnd: typeof e.onEnd === "string" ? e.onEnd : ""
     };

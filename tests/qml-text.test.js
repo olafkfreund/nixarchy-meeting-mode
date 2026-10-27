@@ -28,6 +28,13 @@ for (const file of fs.readdirSync(root).filter(f => f.endsWith(".qml"))) {
   });
 }
 
+// Window titles must never reach logs or notifications.
+const svc = fs.readFileSync(path.join(root, "Service.qml"), "utf8").split("\n");
+svc.forEach((line, i) => {
+  if (/console\./.test(line) && /title/i.test(line)) { failures++; console.log(`FAIL: Service.qml:${i + 1} title in console`); }
+  if (/notify-send|root\.notify\(/.test(line) && /[tT]itles?\b/.test(line.replace(/title, body/, ""))) { failures++; console.log(`FAIL: Service.qml:${i + 1} title in notification`); }
+});
+
 if (checked === 0) {
   console.log("FAIL: no Text items found");
   process.exit(1);
