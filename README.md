@@ -95,7 +95,7 @@ From a terminal or a keybinding:
 
 ```bash
 omarchy-shell meeting-mode toggle     # or: on | off | auto
-omarchy-shell meeting-mode status     # JSON: active, call app, what changed
+omarchy-shell meeting-mode status     # JSON: active, call state and app, what changed
 omarchy-shell meeting-mode settings   # open the settings panel
 ```
 
@@ -103,7 +103,9 @@ omarchy-shell meeting-mode settings   # open the settings panel
 
 Right-click the indicator, or run `omarchy-shell meeting-mode settings`. Every action has its
 own switch, and you choose how long to wait after a call before putting things back
-(5 s, 15 s, 30 s or 1 min). Changes apply from the next meeting.
+(5 s, 15 s, 30 s or 1 min). You can also edit which apps count as calls, which are browsers,
+the meeting window titles that confirm a browser call, and how long a browser microphone may
+stay a "maybe" before it counts as a call. Changes apply from the next meeting.
 
 ![Settings panel](docs/settings.png)
 
@@ -114,23 +116,61 @@ be set there:
 {
   "id": "nixarchy.meeting-mode",
   "onStart": "curl -s -X POST http://homeassistant.local:8123/api/webhook/on-air",
-  "onEnd": "curl -s -X POST http://homeassistant.local:8123/api/webhook/off-air",
-  "callApps": "chrom|firefox|zoom|teams|slack|discord|mumble"
+  "onEnd": "curl -s -X POST http://homeassistant.local:8123/api/webhook/off-air"
 }
 ```
 
 - **`onStart` / `onEnd`**: any shell command, run when a meeting starts and ends. Turn on an
   "on air" light, set your chat status, start a recording, light a Stream Deck key.
-- **`callApps`**: which apps count as a call, matched against the app name and program name of
-  anything recording from the microphone (a case-insensitive regular expression). The default
-  covers Chrome, Chromium, Firefox, Brave, Vivaldi, Zen, LibreWolf, Zoom, Teams, Slack, Webex,
-  Discord, Skype, Jitsi, Signal, Telegram and Element.
+
+## Telling a call from microphone use
+
+Meeting mode only starts for a real call, so a voice note or a dictation tool does not turn
+on Do Not Disturb. What uses the microphone is sorted into three kinds:
+
+- **Call apps** (`nativeApps`; Zoom, Teams, Discord, Vesktop, Slack, Signal, Webex, Cisco
+  Collab Host, Element, Skype, Jitsi, Telegram): a call once the app has held the microphone for
+  3 seconds.
+- **Browsers** (`browsers`; Chrome and Chromium, Firefox, Brave, Vivaldi, Zen, LibreWolf,
+  Edge): a **maybe** after 3 seconds, because a browser may record a voice message too. A maybe
+  becomes a **call** when something confirms it, or after `maybeDelay` seconds (default 60,
+  range 10 to 600).
+- **Everything else** (OBS, Audacity, dictation tools, the nixarchy voice wake word): never a
+  call.
+
+A browser call is confirmed by any of: a window title that matches a pattern in
+`meetingTitles` (one regular expression per line, case-sensitive; the defaults cover Google
+Meet, Teams, Zoom, Jitsi, Huddle, Webex, Messenger and WhatsApp calls), a screen share
+(a PipeWire `xdph-streaming-*` source), or the Firefox or Zen "Sharing Indicator" window.
+
+Window titles are read in memory only. They are never written to a log or a notification; the
+only place a matched title appears is the state file below, which only you can read.
+
+If you had set `callApps` in an earlier version, it is split on the browser list into
+`nativeApps` and `browsers` the first time the settings are read, unless you set those
+yourself.
+
+### State file for other plugins
+
+The service writes `$XDG_RUNTIME_DIR/meeting-mode.json` (mode 0600) whenever `call`, `callApp`,
+`callTitle` or `active` changes, and `omarchy-shell meeting-mode status` prints the same JSON:
+
+```json
+{"active": true, "reason": "Zoom", "since": 1788000000000,
+ "call": "call", "callApp": "Zoom", "callTitle": "", "callSince": 1788000000000,
+ "callDetected": true}
+```
+
+`call` is `none`, `maybe` or `call`; `callDetected` is `call === "call"`, kept for older readers.
+Times are milliseconds since the epoch. Before starting Do Not Disturb the service also runs
+`omarchy-shell meetingai offer`, which does nothing when the meetingai plugin is not installed.
 
 ## How it works
 
 The service is a small QML component inside `omarchy-shell`. It uses the shell's built-in
-PipeWire connection to see which apps have a microphone stream open, so there is no polling
-and no extra process. It never opens the microphone itself and never touches audio: it only
+PipeWire connection to see which apps have a microphone stream open, and its Hyprland
+connection to read window titles, so there is no polling and no extra process (a one-second
+timer runs only while a call app holds the microphone). It never opens the microphone itself and never touches audio: it only
 reads which apps are recording.
 
 The desktop changes are made by `bin/meeting-mode-actions`, a small shell script you can read
@@ -141,9 +181,6 @@ in a minute. It uses Omarchy's own commands (`omarchy toggle notification silenc
 The call status shown in the bar (whether you are in a call, with which app, since when) lives in
 `$XDG_RUNTIME_DIR`, which only you can read; without one it stays in that private state
 directory. It is never written to `/tmp`.
-
-Recording apps that aren't call apps (OBS, Audacity, dictation tools, nixarchy voice's wake word)
-never start meeting mode.
 
 Each action checks first and changes only what needs changing. If Do Not Disturb is already
 on, or voice control isn't running, that action does nothing and nothing is recorded. When the

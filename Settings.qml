@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QQC
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -34,7 +35,11 @@ Item {
         { key: "voice", label: "Pause voice control", hint: "Stop nixarchy voice, wake word included, during the call, if it is running", toggle: true },
         { key: "pauseMedia", label: "Pause music and videos", hint: "Pauses what is playing and resumes it after the call", toggle: true },
         { key: "notify", label: "Notifications", hint: "Say when meeting mode starts and ends", toggle: true },
-        { key: "endDelay", label: "After a call ends", hint: "Wait this long before putting everything back", options: SettingsModel.END_DELAY_OPTIONS }
+        { key: "endDelay", label: "After a call ends", hint: "Wait this long before putting everything back", options: SettingsModel.END_DELAY_OPTIONS },
+        { key: "nativeApps", label: "Call apps", hint: "Apps that count as a call as soon as they use the microphone (regular expression, matched against the app name)", text: true },
+        { key: "browsers", label: "Browsers", hint: "A browser on the microphone is only a maybe until a meeting window or screen share confirms it, or the delay below passes", text: true },
+        { key: "meetingTitles", label: "Meeting window titles", hint: "One regular expression per line, matched against window titles. Titles are never logged.", text: true, multiline: true },
+        { key: "maybeDelay", label: "Treat browser mic as a call after (s)", hint: "10 to 600 seconds", text: true, number: true }
     ]
 
     readonly property string statusLine: {
@@ -63,14 +68,17 @@ Item {
 
     function valueFor(row) {
         var v = store.values[row.key];
-        return row.key === "endDelay" ? String(v) : v;
+        return row.key === "endDelay" || row.number ? String(v) : v;
     }
 
     function apply(row, value) {
-        store.set(row.key, row.key === "endDelay" ? Number(value) : value);
+        store.set(row.key, row.key === "endDelay" || row.number ? Number(value) : value);
     }
 
+    signal edit(int index)
+
     function shift(row, delta) {
+        if (row.text) return;
         if (row.toggle) {
             store.set(row.key, !store.values[row.key]);
             return;
@@ -142,6 +150,8 @@ Item {
                         root.shift(row, 1);
                     else if (event.key === Qt.Key_Left || event.key === Qt.Key_H)
                         root.shift(row, -1);
+                    else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && row.text)
+                        root.edit(root.cursor);
                     else if ((event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && row.toggle)
                         root.shift(row, 1);
                     else
@@ -202,14 +212,15 @@ Item {
                             x: Style.spacing.rowPaddingX
                             width: parent.width - Style.spacing.rowPaddingX * 2
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitHeight: Math.max(labels.implicitHeight, control.height)
+                            implicitHeight: rowItem.modelData.text ? labels.implicitHeight + Style.spacing.md + editor.height : Math.max(labels.implicitHeight, control.height)
 
                             Column {
                                 id: labels
                                 anchors.left: parent.left
-                                anchors.right: control.left
-                                anchors.rightMargin: Style.spacing.huge
-                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.right: rowItem.modelData.text ? parent.right : control.left
+                                anchors.rightMargin: rowItem.modelData.text ? 0 : Style.spacing.huge
+                                anchors.top: rowItem.modelData.text ? parent.top : undefined
+                                anchors.verticalCenter: rowItem.modelData.text ? undefined : parent.verticalCenter
                                 spacing: Style.spacing.xxs
 
                                 Text {
@@ -236,12 +247,12 @@ Item {
                                 id: control
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: rowItem.modelData.toggle ? toggle.width : group.width
-                                height: rowItem.modelData.toggle ? toggle.height : group.height
+                                width: rowItem.modelData.text ? 0 : (rowItem.modelData.toggle ? toggle.width : group.width)
+                                height: rowItem.modelData.text ? 0 : (rowItem.modelData.toggle ? toggle.height : group.height)
 
                                 ButtonGroup {
                                     id: group
-                                    visible: !rowItem.modelData.toggle
+                                    visible: !rowItem.modelData.toggle && !rowItem.modelData.text
                                     focusable: false
                                     options: rowItem.modelData.options || []
                                     value: String(root.valueFor(rowItem.modelData))
@@ -255,6 +266,57 @@ Item {
                                     checked: root.valueFor(rowItem.modelData) === true
                                     hasCursor: rowItem.current
                                     onToggled: root.shift(rowItem.modelData, 1)
+                                }
+                            }
+
+                            // Saved when the field loses focus; Escape leaves the field.
+                            Item {
+                                id: editor
+                                visible: !!rowItem.modelData.text
+                                anchors.top: labels.bottom
+                                anchors.topMargin: Style.spacing.md
+                                width: parent.width
+                                height: rowItem.modelData.multiline ? Style.space(110) : singleField.implicitHeight
+
+                                Connections {
+                                    target: root
+                                    function onEdit(i) {
+                                        if (i !== rowItem.index) return;
+                                        if (rowItem.modelData.multiline) area.forceActiveFocus();
+                                        else singleField.forceActiveFocus();
+                                    }
+                                }
+
+                                TextField {
+                                    id: singleField
+                                    visible: !rowItem.modelData.multiline
+                                    width: rowItem.modelData.number ? Style.space(90) : parent.width
+                                    text: String(root.valueFor(rowItem.modelData))
+                                    foreground: Color.menu.text
+                                    font.family: Style.font.menuFamily
+                                    font.pixelSize: Style.font.bodySmall
+                                    validator: rowItem.modelData.number ? numberCheck : null
+                                    IntValidator { id: numberCheck; bottom: 0; top: 99999 }
+                                    onActiveFocusChanged: if (activeFocus) root.cursor = rowItem.index
+                                    onEditingFinished: root.apply(rowItem.modelData, text)
+                                    Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+                                }
+                                QQC.ScrollView {
+                                    visible: !!rowItem.modelData.multiline
+                                    anchors.fill: parent
+                                    QQC.TextArea {
+                                        id: area
+                                        text: String(root.valueFor(rowItem.modelData))
+                                        color: Color.menu.text
+                                        font.family: Style.font.menuFamily
+                                        font.pixelSize: Style.font.bodySmall
+                                        wrapMode: TextEdit.NoWrap
+                                        onActiveFocusChanged: {
+                                            if (activeFocus) root.cursor = rowItem.index;
+                                            else root.apply(rowItem.modelData, text);
+                                        }
+                                        Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+                                    }
                                 }
                             }
                         }
@@ -274,7 +336,7 @@ Item {
                 }
                 Text {
                     textFormat: Text.PlainText
-                    text: "↑↓ choose   ←→ change   space toggle   esc close"
+                    text: "↑↓ choose   ←→ change   space toggle   enter edit text   esc close"
                     color: Color.menu.text
                     opacity: 0.45
                     font.family: Style.font.menuFamily
