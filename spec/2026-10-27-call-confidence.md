@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: none (issues are disabled on this repo)
 intent: intent/2026-10-27-call-confidence.md
 related: olafkfreund/mixarchy-meetingai spec/2026-10-27-0-call-detection.md (approved), section A
