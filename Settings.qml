@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons // qmllint disable import
+import qs.Commons as Commons // qmllint disable import
 import qs.Ui // qmllint disable import
 import "SettingsModel.js" as SettingsModel
 
@@ -115,7 +116,7 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            color: Color.menu.scrim
+            color: Commons.Color.menu.scrim
         }
 
         MouseArea {
@@ -130,8 +131,8 @@ Item {
             // Never taller than the screen: the rows scroll.
             height: Math.min(body.implicitHeight + card.contentTopInset + card.contentBottomInset, win.height - Style.space(48))
             radius: Style.cornerRadius
-            color: Color.menu.background
-            borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+            color: Commons.Color.menu.background
+            borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
             padding: Style.spacing.panelPadding
 
             MouseArea { anchors.fill: parent }
@@ -196,7 +197,7 @@ Item {
                 Text {
                     textFormat: Text.PlainText
                     text: "Meeting Mode"
-                    color: Color.menu.text
+                    color: Commons.Color.menu.text
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.heading
                     font.bold: true
@@ -206,7 +207,7 @@ Item {
                     width: parent.width
                     wrapMode: Text.Wrap
                     text: root.statusLine
-                    color: root.state.active ? Color.urgent : Color.menu.text
+                    color: root.state.active ? Commons.Color.urgent : Commons.Color.menu.text
                     opacity: root.state.active ? 1 : 0.65
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.bodySmall
@@ -234,7 +235,7 @@ Item {
                         width: body.width
                         height: rowContent.implicitHeight + Style.spacing.lg * 2
                         radius: Style.cornerRadius
-                        color: current ? Color.menu.selectedBackground : "transparent"
+                        color: current ? Commons.Color.menu.selectedBackground : "transparent"
 
                         MouseArea {
                             anchors.fill: parent
@@ -262,7 +263,7 @@ Item {
                                 Text {
                                     textFormat: Text.PlainText
                                     text: rowItem.modelData.label
-                                    color: rowItem.current ? Color.menu.selectedText : Color.menu.text
+                                    color: rowItem.current ? Commons.Color.menu.selectedText : Commons.Color.menu.text
                                     font.family: Style.font.menuFamily
                                     font.pixelSize: Style.font.body
                                 }
@@ -272,7 +273,7 @@ Item {
                                     width: parent.width
                                     wrapMode: Text.Wrap
                                     text: rowItem.modelData.hint
-                                    color: Color.menu.text
+                                    color: Commons.Color.menu.text
                                     opacity: 0.55
                                     font.family: Style.font.menuFamily
                                     font.pixelSize: Style.font.caption
@@ -329,7 +330,7 @@ Item {
                                     visible: !rowItem.modelData.multiline && !rowItem.modelData.number
                                     width: parent.width
                                     text: String(root.valueFor(rowItem.modelData))
-                                    foreground: Color.menu.text
+                                    foreground: Commons.Color.menu.text
                                     font.family: Style.font.menuFamily
                                     font.pixelSize: Style.font.bodySmall
                                     onActiveFocusChanged: if (activeFocus) root.cursor = rowItem.index
@@ -343,7 +344,7 @@ Item {
                                     from: 10
                                     to: 600
                                     value: Number(root.valueFor(rowItem.modelData))
-                                    foreground: Color.menu.text
+                                    foreground: Commons.Color.menu.text
                                     fontFamily: Style.font.menuFamily
                                     fontSize: Style.font.bodySmall
                                     hasCursor: rowItem.current
@@ -355,7 +356,7 @@ Item {
                                     QQC.TextArea {
                                         id: area
                                         text: String(root.valueFor(rowItem.modelData))
-                                        color: Color.menu.text
+                                        color: Commons.Color.menu.text
                                         font.family: Style.font.menuFamily
                                         font.pixelSize: Style.font.bodySmall
                                         wrapMode: TextEdit.NoWrap
@@ -363,11 +364,11 @@ Item {
                                         rightPadding: Style.spacing.controlPaddingX
                                         topPadding: Style.spacing.inputPaddingY
                                         bottomPadding: Style.spacing.inputPaddingY
-                                        selectionColor: Style.selectionFillFor(Color.menu.text, Color.accent)
-                                        selectedTextColor: Color.menu.text
+                                        selectionColor: Style.selectionFillFor(Commons.Color.menu.text, Commons.Color.accent)
+                                        selectedTextColor: Commons.Color.menu.text
                                         background: BorderSurface {
-                                            color: Style.controlFill(area.activeFocus, false, Color.menu.text, Color.accent)
-                                            borderSpec: Border.controlSpec(area.activeFocus ? "focus" : "normal", Color.menu.text, Color.accent)
+                                            color: Style.controlFill(area.activeFocus, false, Commons.Color.menu.text, Commons.Color.accent)
+                                            borderSpec: Border.controlSpec(area.activeFocus ? "focus" : "normal", Commons.Color.menu.text, Commons.Color.accent)
                                             radius: Style.cornerRadius
                                         }
                                         onActiveFocusChanged: {
@@ -388,7 +389,7 @@ Item {
                                 width: parent.width
                                 wrapMode: Text.Wrap
                                 text: rowItem.error
-                                color: Color.urgent
+                                color: Commons.Color.urgent
                                 font.family: Style.font.menuFamily
                                 font.pixelSize: Style.font.caption
                             }
@@ -402,7 +403,7 @@ Item {
                     wrapMode: Text.Wrap
                     topPadding: Style.spacing.md
                     text: "Run your own commands at the start and end of a call (on-air light, chat status): set onStart and onEnd in this plugin's entry in shell.json."
-                    color: Color.menu.text
+                    color: Commons.Color.menu.text
                     opacity: 0.55
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.caption
@@ -410,7 +411,7 @@ Item {
                 Text {
                     textFormat: Text.PlainText
                     text: "↑↓ choose   ←→ change   space toggle   enter edit text   esc close"
-                    color: Color.menu.text
+                    color: Commons.Color.menu.text
                     opacity: 0.45
                     font.family: Style.font.menuFamily
                     font.pixelSize: Style.font.caption
