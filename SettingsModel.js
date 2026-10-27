@@ -44,38 +44,59 @@ function validRegex(p, flags) {
     }
 }
 
+// Compiled patterns are cached: the service tests every stream on every tick.
+var rxCache = {};
+function rx(src, flags) {
+    var k = (flags || "") + "/" + src;
+    if (!rxCache[k]) rxCache[k] = new RegExp(src, flags);
+    return rxCache[k];
+}
+
+// "" when text is a valid value for this setting, else a short reason.
+// The settings panel refuses to save anything this rejects.
+function regexError(key, text) {
+    var lines = key === "meetingTitles" ? String(text).split("\n") : [String(text)];
+    for (var i = 0; i < lines.length; i++)
+        if (lines[i].trim() !== "" && !validRegex(lines[i].trim(), key === "meetingTitles" ? "" : "i"))
+            return "Not a valid regular expression: " + lines[i].trim();
+    return "";
+}
+
 function normalize(raw) {
     var e = raw && typeof raw === "object" ? raw : {};
     var delay = Number(e.endDelay);
     delay = isFinite(delay) ? Math.max(3, Math.min(600, Math.round(delay))) : DEFAULTS.endDelay;
     var apps = typeof e.callApps === "string" && e.callApps.trim() !== "" ? e.callApps.trim() : OLD_CALL_APPS;
-    try {
-        new RegExp(apps, "i");
-    } catch (err) {
+    if (apps.charAt(0) === "(" && apps.charAt(apps.length - 1) === ")" && validRegex(apps.slice(1, -1), "i"))
+        apps = apps.slice(1, -1);
+    if (!validRegex(apps, "i"))
         apps = OLD_CALL_APPS;
-    }
     // A callApps the user changed is split into the two new lists, unless
     // they set those lists themselves.
     var native = DEFAULTS.nativeApps, browsers = DEFAULTS.browsers;
     if (apps !== OLD_CALL_APPS && e.nativeApps === undefined && e.browsers === undefined) {
-        var known = DEFAULTS.browsers.split("|");
-        var parts = apps.split("|");
-        var b = parts.filter(function(t) { return known.indexOf(t.toLowerCase()) !== -1; });
-        var n = parts.filter(function(t) { return known.indexOf(t.toLowerCase()) === -1 && t !== ""; });
+        var known = new RegExp(DEFAULTS.browsers, "i");
+        var parts = apps.split("|").map(function(t) { return t.trim(); }).filter(function(t) { return t !== ""; });
+        var b = parts.filter(function(t) { return known.test(t); });
+        var n = parts.filter(function(t) { return !known.test(t); });
         if (n.length) native = n.join("|");
         if (b.length) browsers = b.join("|");
     }
     if (typeof e.nativeApps === "string" && e.nativeApps.trim() !== "" && validRegex(e.nativeApps.trim(), "i")) native = e.nativeApps.trim();
     if (typeof e.browsers === "string" && e.browsers.trim() !== "" && validRegex(e.browsers.trim(), "i")) browsers = e.browsers.trim();
-    var titles = typeof e.meetingTitles === "string"
-        ? e.meetingTitles.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l !== "" && validRegex(l); }).join("\n")
-        : "";
+    // Missing: the defaults. An empty string is a choice: no title confirmation.
+    var titles = DEFAULTS.meetingTitles;
+    if (typeof e.meetingTitles === "string") {
+        var lines = e.meetingTitles.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l !== ""; });
+        var good = lines.filter(function(l) { return validRegex(l); });
+        if (good.length || !lines.length) titles = good.join("\n");
+    }
     var maybe = Number(e.maybeDelay);
     maybe = isFinite(maybe) && e.maybeDelay !== "" && e.maybeDelay !== null ? Math.max(10, Math.min(600, Math.round(maybe))) : DEFAULTS.maybeDelay;
     return {
         nativeApps: native,
         browsers: browsers,
-        meetingTitles: titles !== "" ? titles : DEFAULTS.meetingTitles,
+        meetingTitles: titles,
         maybeDelay: maybe,
         dnd: e.dnd !== false,
         awake: e.awake !== false,
@@ -107,15 +128,15 @@ function isCallStream(props, callApps) {
     var cls = String(props["media.class"] || "");
     if (cls !== "" && cls.indexOf("Input") === -1) return false;
     var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
-    return new RegExp(callApps, "i").test(who);
+    return rx(callApps, "i").test(who);
 }
 
 // "native" | "browser" | "" from a capture stream's properties.
 function classify(props, s) {
     if (!isCallStream(props, ".")) return "";
     var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
-    if (new RegExp(s.nativeApps, "i").test(who)) return "native";
-    if (new RegExp(s.browsers, "i").test(who)) return "browser";
+    if (rx(s.nativeApps, "i").test(who)) return "native";
+    if (rx(s.browsers, "i").test(who)) return "browser";
     return "";
 }
 
@@ -124,13 +145,14 @@ function confirmTitle(titles, s) {
     var pats = String(s.meetingTitles).split("\n").filter(function(l) { return l !== "" && validRegex(l); });
     for (var i = 0; i < (titles || []).length; i++)
         for (var j = 0; j < pats.length; j++)
-            if (new RegExp(pats[j]).test(String(titles[i]))) return String(titles[i]);
+            if (rx(pats[j]).test(String(titles[i]))) return String(titles[i]);
     return "";
 }
 
 // How sure we are that a held mic stream is a call.
 function decide(x, s) {
-    var title = x.title || "";
+    // Only a browser call carries the title that confirmed it.
+    var title = x.kind === "browser" && x.confirmed ? x.title || "" : "";
     var held = x.heldMs >= START_AFTER * 1000;
     var call = "none";
     if (x.kind === "native" && held) call = "call";
@@ -169,6 +191,7 @@ if (typeof module !== "undefined")
         DEFAULTS: DEFAULTS,
         START_AFTER: START_AFTER,
         normalize: normalize,
+        regexError: regexError,
         actionList: actionList,
         isCallStream: isCallStream,
         classify: classify,

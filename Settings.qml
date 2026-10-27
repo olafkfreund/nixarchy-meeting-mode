@@ -38,7 +38,7 @@ Item {
         { key: "endDelay", label: "After a call ends", hint: "Wait this long before putting everything back", options: SettingsModel.END_DELAY_OPTIONS },
         { key: "nativeApps", label: "Call apps", hint: "Apps that count as a call as soon as they use the microphone (regular expression, matched against the app name)", text: true },
         { key: "browsers", label: "Browsers", hint: "A browser on the microphone is only a maybe until a meeting window or screen share confirms it, or the delay below passes", text: true },
-        { key: "meetingTitles", label: "Meeting window titles", hint: "One regular expression per line, matched against window titles. Titles are never logged.", text: true, multiline: true },
+        { key: "meetingTitles", label: "Meeting window titles", hint: "One regular expression per line, matched against window titles. Titles are never logged. Empty means no title confirmation.", text: true, multiline: true },
         { key: "maybeDelay", label: "Treat browser mic as a call after (s)", hint: "10 to 600 seconds", text: true, number: true }
     ]
 
@@ -195,6 +195,15 @@ Item {
                         required property var modelData
                         required property int index
                         readonly property bool current: index === root.cursor
+                        property string error: ""   // why the last edit was not saved
+
+                        // Saves unless the text is not a valid pattern; then the
+                        // previous value stays and the reason shows under the field.
+                        function commit(text) {
+                            rowItem.error = SettingsModel.regexError(rowItem.modelData.key, text);
+                            if (rowItem.error === "")
+                                root.apply(rowItem.modelData, text);
+                        }
                         width: body.width
                         height: rowContent.implicitHeight + Style.spacing.lg * 2
                         radius: Style.cornerRadius
@@ -212,7 +221,7 @@ Item {
                             x: Style.spacing.rowPaddingX
                             width: parent.width - Style.spacing.rowPaddingX * 2
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitHeight: rowItem.modelData.text ? labels.implicitHeight + Style.spacing.md + editor.height : Math.max(labels.implicitHeight, control.height)
+                            implicitHeight: rowItem.modelData.text ? labels.implicitHeight + Style.spacing.md + editor.height + (rowItem.error !== "" ? errorText.implicitHeight + Style.spacing.md : 0) : Math.max(labels.implicitHeight, control.height)
 
                             Column {
                                 id: labels
@@ -276,30 +285,42 @@ Item {
                                 anchors.top: labels.bottom
                                 anchors.topMargin: Style.spacing.md
                                 width: parent.width
-                                height: rowItem.modelData.multiline ? Style.space(110) : singleField.implicitHeight
+                                height: rowItem.modelData.multiline ? Style.space(110) : (rowItem.modelData.number ? numberField.implicitHeight : singleField.implicitHeight)
 
                                 Connections {
                                     target: root
                                     function onEdit(i) {
                                         if (i !== rowItem.index) return;
                                         if (rowItem.modelData.multiline) area.forceActiveFocus();
+                                        else if (rowItem.modelData.number) numberField.field.forceActiveFocus();
                                         else singleField.forceActiveFocus();
                                     }
                                 }
 
                                 TextField {
                                     id: singleField
-                                    visible: !rowItem.modelData.multiline
-                                    width: rowItem.modelData.number ? Style.space(90) : parent.width
+                                    visible: !rowItem.modelData.multiline && !rowItem.modelData.number
+                                    width: parent.width
                                     text: String(root.valueFor(rowItem.modelData))
                                     foreground: Color.menu.text
                                     font.family: Style.font.menuFamily
                                     font.pixelSize: Style.font.bodySmall
-                                    validator: rowItem.modelData.number ? numberCheck : null
-                                    IntValidator { id: numberCheck; bottom: 0; top: 99999 }
                                     onActiveFocusChanged: if (activeFocus) root.cursor = rowItem.index
-                                    onEditingFinished: root.apply(rowItem.modelData, text)
+                                    onEditingFinished: rowItem.commit(text)
                                     Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+                                }
+                                // The shown value is the saved, clamped one.
+                                NumberField {
+                                    id: numberField
+                                    visible: !!rowItem.modelData.number
+                                    from: 10
+                                    to: 600
+                                    value: Number(root.valueFor(rowItem.modelData))
+                                    foreground: Color.menu.text
+                                    fontFamily: Style.font.menuFamily
+                                    fontSize: Style.font.bodySmall
+                                    hasCursor: rowItem.current
+                                    onModified: function(v) { root.apply(rowItem.modelData, v); }
                                 }
                                 QQC.ScrollView {
                                     visible: !!rowItem.modelData.multiline
@@ -311,13 +332,38 @@ Item {
                                         font.family: Style.font.menuFamily
                                         font.pixelSize: Style.font.bodySmall
                                         wrapMode: TextEdit.NoWrap
+                                        leftPadding: Style.spacing.controlPaddingX
+                                        rightPadding: Style.spacing.controlPaddingX
+                                        topPadding: Style.spacing.inputPaddingY
+                                        bottomPadding: Style.spacing.inputPaddingY
+                                        selectionColor: Style.selectionFillFor(Color.menu.text, Color.accent)
+                                        selectedTextColor: Color.menu.text
+                                        background: BorderSurface {
+                                            color: Style.controlFill(area.activeFocus, false, Color.menu.text, Color.accent)
+                                            borderSpec: Border.controlSpec(area.activeFocus ? "focus" : "normal", Color.menu.text, Color.accent)
+                                            radius: Style.cornerRadius
+                                        }
                                         onActiveFocusChanged: {
                                             if (activeFocus) root.cursor = rowItem.index;
-                                            else root.apply(rowItem.modelData, text);
+                                            else rowItem.commit(text);
                                         }
                                         Keys.onEscapePressed: keyCatcher.forceActiveFocus()
                                     }
                                 }
+                            }
+
+                            Text {
+                                id: errorText
+                                textFormat: Text.PlainText
+                                visible: rowItem.error !== ""
+                                anchors.top: editor.bottom
+                                anchors.topMargin: Style.spacing.md
+                                width: parent.width
+                                wrapMode: Text.Wrap
+                                text: rowItem.error
+                                color: Color.urgent
+                                font.family: Style.font.menuFamily
+                                font.pixelSize: Style.font.caption
                             }
                         }
                     }

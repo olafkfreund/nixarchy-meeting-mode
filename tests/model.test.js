@@ -106,6 +106,17 @@ test("decide tiers and boundaries", () => {
   assert.strictEqual(M.decide({ kind: "browser", heldMs: 10000 }, M.normalize({ maybeDelay: 10 })).call, "call");
 });
 
+test("titles: empty means none, invalid is refused, native carries no title", () => {
+  const none = M.normalize({ meetingTitles: "" });
+  assert.strictEqual(none.meetingTitles, "");
+  assert.strictEqual(M.confirmTitle(["Huddle"], none), "");
+  assert.strictEqual(M.normalize({ meetingTitles: "(bad" }).meetingTitles, M.DEFAULTS.meetingTitles);
+  assert.ok(M.regexError("meetingTitles", "ok\n(bad") !== "");
+  assert.strictEqual(M.regexError("meetingTitles", "ok\n^x$"), "");
+  assert.ok(M.regexError("nativeApps", "zoom|(") !== "");
+  assert.strictEqual(M.decide({ kind: "native", heldMs: 5000, confirmed: true, title: "Huddle" }, D).title, "");
+});
+
 test("maybeDelay is clamped", () => {
   assert.strictEqual(D.maybeDelay, 60);
   assert.strictEqual(M.normalize({ maybeDelay: 1 }).maybeDelay, 10);
@@ -121,6 +132,16 @@ test("a user-set callApps migrates", () => {
   assert.strictEqual(M.normalize({ callApps: "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element" }).nativeApps, M.DEFAULTS.nativeApps);
   const own = M.normalize({ callApps: "mumble", nativeApps: "foo" });
   assert.strictEqual(own.nativeApps, "foo", "explicit lists win");
+  const m = (callApps) => M.normalize({ callApps });
+  assert.strictEqual(m("chrome|zoom").browsers, "chrome");
+  assert.strictEqual(m("chromium|zoom").browsers, "chromium");
+  assert.strictEqual(m(" firefox | mumble").browsers, "firefox");
+  assert.strictEqual(m("firefox-esr|mumble").browsers, "firefox-esr");
+  assert.strictEqual(m("(zoom|firefox)").nativeApps, "zoom");
+  assert.strictEqual(m("(zoom|firefox)").browsers, "firefox");
+  const only = m("chrom|firefox");
+  assert.strictEqual(only.browsers, "chrom|firefox");
+  assert.strictEqual(only.nativeApps, M.DEFAULTS.nativeApps, "a browser-only list keeps the default call apps");
 });
 
 test("state file is never world-readable /tmp", () => {

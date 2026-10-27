@@ -84,3 +84,15 @@ None yet.
   `omarchy-shell meetingai offer` detached, without a plugin check: the
   IPC target simply doesn't exist when meetingai isn't installed. It is
   asynchronous, so it is not guaranteed to land before DND.
+- **Review fixes (Opus):** a meeting starts on `call` but only `none`
+  ends it or clears `suppressed`; a stream that was `call` stays `call`
+  while it exists (tab switches, shell restarts); the Firefox/Zen sharing
+  indicator confirmer is removed (it opens for mic-only use); the offer
+  runs as a `Process` and DND starts from its exit (1 s fallback); the
+  `callApps` migration trims tokens and matches browsers by pattern;
+  titles confirm only browser streams and only from browser toplevels;
+  only capture streams and `VideoSource` nodes are tracked; state writes
+  are coalesced and carry `updated` and `pid`. Compiled regexes are cached
+  in a module memo (not in `normalize()` output, which is persisted). An
+  explicit empty `meetingTitles` turns title confirmation off. The number
+  field has no Escape handler.

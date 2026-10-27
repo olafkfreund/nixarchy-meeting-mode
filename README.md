@@ -141,10 +141,13 @@ on Do Not Disturb. What uses the microphone is sorted into three kinds:
 A browser call is confirmed by any of: a window title that matches a pattern in
 `meetingTitles` (one regular expression per line, case-sensitive; the defaults cover Google
 Meet, Teams, Zoom, Jitsi, Huddle, Webex, Messenger and WhatsApp calls), a screen share
-(a PipeWire `xdph-streaming-*` source), or the Firefox or Zen "Sharing Indicator" window.
+(a PipeWire `xdph-streaming-*` source). Only windows of the apps in `browsers` are looked at.
+A browser stream that has been a call stays one while that stream exists, so switching tabs does
+not end the meeting. An empty `meetingTitles` turns title confirmation off.
 
 Window titles are read in memory only. They are never written to a log or a notification; the
-only place a matched title appears is the state file below, which only you can read.
+only place a matched title appears is `callTitle` in the state file below, for browser calls, in
+your private runtime directory.
 
 If you had set `callApps` in an earlier version, it is split on the browser list into
 `nativeApps` and `browsers` the first time the settings are read, unless you set those
@@ -152,18 +155,22 @@ yourself.
 
 ### State file for other plugins
 
-The service writes `$XDG_RUNTIME_DIR/meeting-mode.json` (mode 0600) whenever `call`, `callApp`,
+The service writes `$XDG_RUNTIME_DIR/meeting-mode.json` (in your private `0700` runtime directory) whenever `call`, `callApp`,
 `callTitle` or `active` changes, and `omarchy-shell meeting-mode status` prints the same JSON:
 
 ```json
 {"active": true, "reason": "Zoom", "since": 1788000000000,
+ "updated": 1788000003000, "pid": 4242,
  "call": "call", "callApp": "Zoom", "callTitle": "", "callSince": 1788000000000,
  "callDetected": true}
 ```
 
 `call` is `none`, `maybe` or `call`; `callDetected` is `call === "call"`, kept for older readers.
-Times are milliseconds since the epoch. Before starting Do Not Disturb the service also runs
-`omarchy-shell meetingai offer`, which does nothing when the meetingai plugin is not installed.
+Times are milliseconds since the epoch; `pid` is the shell that wrote the file, so a reader can
+tell a stale file from a live one. Meeting mode ends only when the call state is back to `none`;
+a `maybe` keeps a running meeting going. Before starting Do Not Disturb the service also runs
+`omarchy-shell meetingai offer` (waiting up to a second for it), which does nothing when the
+meetingai plugin is not installed.
 
 ## How it works
 
