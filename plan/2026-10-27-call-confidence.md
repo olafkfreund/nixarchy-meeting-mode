@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: none (issues are disabled on this repo)
 spec: spec/2026-10-27-call-confidence.md
 reviewers:   # read-only, after the Opus review
