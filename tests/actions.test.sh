@@ -94,5 +94,20 @@ chmod 755 "$XDG_STATE_HOME/meeting-mode"
 run status >/dev/null
 check "state dir is 0700" "$(stat -c %a "$XDG_STATE_HOME/meeting-mode")" "700"
 
+# 7. ancestors: fake stat files; the name may hold ") (" and spaces.
+export MEETING_MODE_PROC="$tmp/proc"
+anc() { local o; o=$(run ancestors "$1"); echo "${o//$'\n'/ }"; }
+st() { mkdir -p "$MEETING_MODE_PROC/$1"; echo "$1 ($2) S $3 1 1 0" >"$MEETING_MODE_PROC/$1/stat"; }
+st 500 "web) (x y" 400; st 400 bash 300; st 300 init-ish 1; st 1 init 0
+check "ancestors: odd name, stops at 1" "$(anc 500)" "500 400 300 1"
+for i in {10..25}; do st "$i" p "$((i+1))"; done
+check "ancestors: 8-step limit" "$(anc 10)" "10 11 12 13 14 15 16 17 18"
+st 600 p 999
+check "ancestors: missing file" "$(anc 600)" "600 999"
+st 700 a 701; st 701 b 700
+check "ancestors: loop" "$(anc 700)" "700 701"
+check "ancestors: bad pid" "$(run ancestors abc)" ""
+unset MEETING_MODE_PROC
+
 echo "actions: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]
