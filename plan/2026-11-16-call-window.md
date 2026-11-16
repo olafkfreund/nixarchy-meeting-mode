@@ -234,7 +234,7 @@ need not be opened.
    | Teams (`omateams`): join, then leave | `call` within ~3 s, `callBy: webapp`, `bound`, class `omateams`; `none` when the window closes or the mic is released |
    | Meet in a Chrome tab: join; switch tab; leave | `title`, `bound`, showing true; tab switch: still `call`, showing false; leave: ends when the mic stream goes |
    | Meet PWA | as the tab, with its own window |
-   | Discord voice channel | `native`; window `bound` or `none` (several windows: `ambiguous`) |
+   | Discord voice channel | `native`; window `bound` (one window) or `none` (several, none with a meeting title) |
    | Zoom meeting, with Zoom Workplace open | `native`, `bound` to the meeting window, not Workplace |
 
    Results go into meetingai PR #102.
@@ -244,6 +244,7 @@ need not be opened.
 - *Step 1 (Codex):* `confirmed` also upgrades `title` → `webapp` (the window class is the stronger signal); `matches()` returns false for an empty pattern or empty text.
 - *Step 3 (coder, deviation):* the refresh is asked again from `onWindowsChanged` only while the number of unrefreshed windows has fallen since the last ask, so a window that never refreshes cannot cause a refresh loop. The chain cache lives in the stored `step()` state (`model.chains`), which `step()` prunes to live streams.
 - *Step 3 (lead fix):* the next ancestry run starts only after both the process exit and its output are in, in either order; otherwise a late output was read with a cleared key, dropped, and asked again forever.
+- *Review fixes (Opus, Codex):* the refresh is asked again after each answer that still leaves a window unrefreshed, at most 3 times per change of the list (replacing the step 3 "count went down" rule, which could stall on a dropped refresh), and counted after the `windows` binding has updated (`Qt.callLater`). A failed helper start releases the ancestry queue after 1 s. An ambiguous stream stays ambiguous while a new window is unrefreshed, instead of flickering to `none`. The pruning test now passes stale chains. The step 5 Discord row is corrected: several Discord windows without a meeting title give `none`, not `ambiguous`.
 - *Step 4 (coder):* README also gained a short paragraph on binding a stream to its window and the end on window close.
 
 ## Tests

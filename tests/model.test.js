@@ -194,7 +194,8 @@ test("stream keys isolate reused ids and prune gone map entries", () => {
   const old = run({}, [stream(1, 12)], [win(12, "a", "Zoom Meeting")], { "1:12": [12] }, 0);
   old.confirmed["1:12"] = { by: "title", at: 3000 };
   old.ended["1:12"] = true;
-  const next = run(old, [stream(1, 13)], [win(13, "b", "Inbox")], { "1:13": [13] }, 10000);
+  // Service.qml passes the whole previous cache, gone keys included.
+  const next = run(old, [stream(1, 13)], [win(13, "b", "Inbox")], { "1:12": [12], "1:13": [13] }, 10000);
   assert.strictEqual(M.streamKey(1, 13), "1:13");
   for (const key of ["heldAt", "confirmed", "bindings", "ended", "chains"])
     assert.deepStrictEqual(Object.keys(next[key]), key === "confirmed" || key === "ended" ? [] : ["1:13"], key);
@@ -312,6 +313,16 @@ test("settings migrate only the exact old title default and validate webApps", (
 
 test("unknown idle recorder does not need the timer", () => {
   assert.strictEqual(run({}, [stream(1, 12, "Recorder", "record")], [], {}, 0).timerNeeded, false);
+});
+
+test("an ambiguous call stays ambiguous while a new window is unrefreshed", () => {
+  const ws = [win(12, "a", "Zoom Meeting"), win(12, "b", "Zoom Meeting")];
+  const first = run(run({}, [stream(1, 12)], ws, { "1:12": [12] }, 0), [stream(1, 12)], ws, { "1:12": [12] }, 70000);
+  assert.strictEqual(first.fields.callWindowState, "ambiguous");
+  assert.strictEqual(first.ambiguous["1:12"], true);
+  const next = run(first, [stream(1, 12)], ws.concat([win(undefined, "", "", "", false)]), first.chains, 71000);
+  assert.strictEqual(next.ambiguous["1:12"], true);
+  assert.strictEqual(next.fields.callWindowState, "ambiguous");
 });
 
 console.log(`model: ${n} tests passed`);

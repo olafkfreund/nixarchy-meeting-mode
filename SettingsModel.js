@@ -234,13 +234,14 @@ function candidates(chain, windows, s) {
     return [];
 }
 
-function bind(prev, cands, windows, refreshedAll) {
+function bind(prev, cands, windows, refreshedAll, wasAmbiguous) {
     if (prev) {
         for (var i = 0; i < windows.length; i++)
             if (windows[i].stableId === prev) return { stableId: prev, ambiguous: false };
         return { stableId: "", ambiguous: false };
     }
-    if (!refreshedAll) return { stableId: "", ambiguous: false };
+    // While a window is unrefreshed nothing new binds; an ambiguous stream stays ambiguous meanwhile.
+    if (!refreshedAll) return { stableId: "", ambiguous: !!wasAmbiguous };
     return { stableId: cands.length === 1 ? cands[0].stableId : "", ambiguous: cands.length > 1 };
 }
 
@@ -269,7 +270,7 @@ function windowFields(calls, prev, s) {
 
 function step(prev, input, now, s) {
     prev = prev || {};
-    var heldAt = {}, confirmed = {}, bindings = {}, ended = {}, chains = {};
+    var heldAt = {}, confirmed = {}, bindings = {}, ended = {}, chains = {}, ambiguous = {};
     var windows = input.windows || [], streams = input.streams || [];
     var refreshedAll = windows.every(function(w) { return w.refreshed; });
     var needChain = [], calls = [], ranked = [], timerNeeded = false;
@@ -285,9 +286,10 @@ function step(prev, input, now, s) {
             else needChain.push({ key: key, pid: pid });
         }
         var previous = prev.bindings && prev.bindings[key] || "";
-        var binding = Number.isFinite(pid) && pid > 0 && !ended[key] ? bind(previous, candidates(chains[key], windows, s), windows, refreshedAll) : { stableId: "", ambiguous: false };
+        var binding = Number.isFinite(pid) && pid > 0 && !ended[key] ? bind(previous, candidates(chains[key], windows, s), windows, refreshedAll, prev.ambiguous && prev.ambiguous[key]) : { stableId: "", ambiguous: false };
         if (previous && !binding.stableId) ended[key] = true;
         if (binding.stableId) bindings[key] = binding.stableId;
+        if (binding.ambiguous) ambiguous[key] = true;
         var window = windows.filter(function(w) { return w.stableId === binding.stableId; })[0];
         var kind = kindOf(stream.props, window && window.cls, s);
         if (kind && !ended[key]) timerNeeded = true;
@@ -320,7 +322,7 @@ function step(prev, input, now, s) {
     });
     var winner = ranked[0], fields = windowFields(calls, prev.fields, s);
     fields.callBy = winner && winner.level === "call" ? winner.confirmation.by : "";
-    return { heldAt: heldAt, confirmed: confirmed, bindings: bindings, ended: ended, chains: chains,
+    return { heldAt: heldAt, confirmed: confirmed, bindings: bindings, ended: ended, chains: chains, ambiguous: ambiguous,
              fields: fields, call: winner ? winner.level : "none",
              callApp: winner ? callAppName(winner.props) : "",
              callTitle: winner && winner.level === "call" && winner.kind === "browser" && winner.window ? confirmTitle([winner.window.title], s) : "",

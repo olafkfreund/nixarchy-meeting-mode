@@ -77,10 +77,11 @@ Item {
         return out;
     }
 
-    // Refresh the toplevels' IPC data once per change of the list, and again
-    // after an answer that left some unrefreshed (Quickshell drops a refresh
-    // asked while one is in flight). A window that never refreshes stops it.
-    property int askedUnrefreshed: 0
+    // Refresh the toplevels' IPC data when a window lacks pid or stableId.
+    // Quickshell drops a refresh asked while one is in flight, so after each
+    // answer that still leaves one unrefreshed, ask again: at most 3 times per
+    // change of the list, so a window that never refreshes cannot loop.
+    property int refreshTries: 0
     function unrefreshed() {
         var n = 0;
         for (var i = 0; i < root.windows.length; i++)
@@ -89,17 +90,17 @@ Item {
     }
     Connections {
         target: Hyprland.toplevels
-        function onValuesChanged() {
-            root.askedUnrefreshed = root.unrefreshed();
-            if (root.askedUnrefreshed > 0) Hyprland.refreshToplevels();
+        // Deferred: the `windows` binding must have re-read the list before it is counted.
+        function onValuesChanged() { root.refreshTries = 0; Qt.callLater(root.refreshIfNeeded); }
+    }
+    function refreshIfNeeded() {
+        if (root.unrefreshed() > 0 && root.refreshTries < 3) {
+            root.refreshTries++;
+            Hyprland.refreshToplevels();
         }
     }
     onWindowsChanged: {
-        var n = root.unrefreshed();
-        if (n > 0 && n < root.askedUnrefreshed) {
-            root.askedUnrefreshed = n;
-            Hyprland.refreshToplevels();
-        }
+        Qt.callLater(root.refreshIfNeeded);
         root.recompute();
     }
 
@@ -158,6 +159,12 @@ Item {
         root.ancOutput = true;
         ancestryProc.command = [root.helper, "ancestors", String(item.pid)];
         ancestryProc.running = true;
+        if (!ancestryProc.running) { root.ancOutput = false; root.ancKey = ""; }   // failed to start: never jam the queue
+    }
+    Timer {
+        id: ancWatchdog
+        interval: 1000
+        onTriggered: if (root.ancOutput && !ancestryProc.running) { root.ancOutput = false; root.ancKey = ""; root.nextAncestry(); }
     }
     Process {
         id: ancestryProc
@@ -176,7 +183,11 @@ Item {
                 if (!ancestryProc.running) { root.ancKey = ""; root.nextAncestry(); }
             }
         }
-        onRunningChanged: if (!running && !root.ancOutput) { root.ancKey = ""; root.nextAncestry(); }
+        onRunningChanged: {
+            if (running) return;
+            if (!root.ancOutput) { root.ancKey = ""; root.nextAncestry(); }
+            else ancWatchdog.restart();   // a failed start never finishes its output
+        }
     }
 
     onCallChanged: {
