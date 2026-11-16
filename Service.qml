@@ -433,6 +433,7 @@ Item {
     }
 
     Component.onCompleted: {
+        Qt.callLater(root.refreshIfNeeded);   // windows already open at load may be unrefreshed
         // Pick up a meeting left active by a shell restart; the end timer
         // undoes it if the call is already over.
         root.runHelper(["status"], function(status) {

@@ -315,6 +315,18 @@ test("unknown idle recorder does not need the timer", () => {
   assert.strictEqual(run({}, [stream(1, 12, "Recorder", "record")], [], {}, 0).timerNeeded, false);
 });
 
+test("an unbound stream never takes an unrefreshed window's class or title", () => {
+  const pending = { pid: undefined, stableId: "", cls: "omateams", title: "Zoom Meeting", refreshed: false };
+  const rec = stream(1, 500, "pw-record", "pw-record");
+  const r = run(run({}, [rec], [pending], { "1:500": [500] }, 0), [rec], [pending], { "1:500": [500] }, 5000);
+  assert.strictEqual(r.call, "none");
+  assert.deepStrictEqual(r.confirmed, {});
+  const br = stream(2, 600);
+  const b = run(run({}, [br], [pending], { "2:600": [600] }, 0), [br], [pending], { "2:600": [600] }, 5000);
+  assert.strictEqual(b.call, "maybe");
+  assert.strictEqual(b.callTitle, "");
+});
+
 test("an ambiguous call stays ambiguous while a new window is unrefreshed", () => {
   const ws = [win(12, "a", "Zoom Meeting"), win(12, "b", "Zoom Meeting")];
   const first = run(run({}, [stream(1, 12)], ws, { "1:12": [12] }, 0), [stream(1, 12)], ws, { "1:12": [12] }, 70000);

@@ -290,7 +290,8 @@ function step(prev, input, now, s) {
         if (previous && !binding.stableId) ended[key] = true;
         if (binding.stableId) bindings[key] = binding.stableId;
         if (binding.ambiguous) ambiguous[key] = true;
-        var window = windows.filter(function(w) { return w.stableId === binding.stableId; })[0];
+        // An unbound stream has no window: "" must not match an unrefreshed window's empty id.
+        var window = binding.stableId ? windows.filter(function(w) { return w.stableId === binding.stableId; })[0] : undefined;
         var kind = kindOf(stream.props, window && window.cls, s);
         if (kind && !ended[key]) timerNeeded = true;
         var heldMs = now - heldAt[key], title = window && confirmTitle([window.title], s) || "";
