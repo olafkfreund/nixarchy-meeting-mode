@@ -66,7 +66,11 @@ need not be opened.
 - **Candidates:** the first pid in the stream's chain that owns any windows;
   with several, only those whose title matches `meetingTitles`.
 - **Binding:** a previous `stableId` holds while that window exists, through
-  title changes, and never moves. Otherwise exactly one candidate binds; two or
+  title changes, and never moves, except (*owner amendment*): a binding made
+  because it was the owning pid's only window, with no title filter, moves
+  once to the single window of that same pid whose title matches
+  `meetingTitles`. Store how each binding was made (`sole` or `title`); a
+  `title` binding never moves; a moved binding counts as `title`. Otherwise exactly one candidate binds; two or
   more are `ambiguous`; none is unbound.
 
 ### Confirmation and the end
@@ -79,8 +83,11 @@ need not be opened.
   the stream stays a call: a tab switch keeps `title`, `maybeDelay` does not
   turn it into `fallback`. `fallback` may upgrade to `title` or `webapp`
   (keeping `at`); nothing downgrades.
-- **The end:** a stream whose bound window closes is `ended` (counts as
-  `none`) until the stream goes away; a new window does not revive it. A
+- **The end:** a `browser` or `webapp` stream whose bound window closes is
+  `ended` (counts as `none`) until the stream goes away; a new window does not
+  revive it. (*Owner amendment:*) a `native` stream whose window closes stays a
+  call while the stream exists: its binding is cleared, it may bind again, and
+  meanwhile it is unbound (window state `none`). A
   never-bound stream ends when it goes away. A lost title ends nothing.
 - **The winning stream** sets `call`, `callBy`, `callApp` and `callTitle`
   together: the highest state (`call` > `maybe` > `none`); among calls, any

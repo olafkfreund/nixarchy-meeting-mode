@@ -70,7 +70,12 @@ writes the file.
   only those whose title matches `meetingTitles` remain.
 - **`SettingsModel.bind(prev, candidates, windows)`** (pure), per stream:
   - a previous binding holds while a window with that `stableId` exists, through
-    title changes, and never moves;
+    title changes, and never moves, with one exception (*amended by the owner,
+    2026-11-16*): a binding made because it was the process's **only** window
+    (no title filter applied) may move **once** to another window of the same
+    owning pid whose title matches `meetingTitles`, when that is the only
+    such window. A binding chosen by title never moves. (Zoom opening the mic
+    while Zoom Workplace is its only window, then opening "Zoom Meeting".)
   - otherwise exactly one candidate binds; two or more give `ambiguous`; none
     gives unbound.
 - Bindings live in `bindings` (stream id → `stableId`), dropped with the
@@ -119,7 +124,11 @@ writes the file.
   window later qualifies; nothing ever downgrades.
 - When its bound window closes, the stream is marked `ended` until the stream
   goes away, and counts as `none`. A new window does not revive it: the call
-  ends.
+  ends. *Amended by the owner, 2026-11-16:* this applies to `browser` and
+  `webapp` streams only. A `native` stream whose window closes (Discord or
+  Slack closed to the tray) stays a call while its mic stream exists; its
+  binding is cleared and it may bind again (window state `none` meanwhile, so
+  meetingai pauses screenshots).
 - A stream that was never bound keeps today's rule: it ends when it goes away.
 - A lost title never ends a call.
 
