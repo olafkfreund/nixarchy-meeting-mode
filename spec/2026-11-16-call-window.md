@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: none (issues are disabled on this repo)
 intent: intent/2026-11-16-call-window.md
 related: olafkfreund/nixarchy-meetingai spec/2026-11-16-101-meeting-end-and-window-shots.md section A (approved), PR #102
