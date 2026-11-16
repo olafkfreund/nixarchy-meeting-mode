@@ -25,11 +25,18 @@ writes the file.
   - `tests/actions.test.sh` covers it with fake `stat` files (a name with
     `) (`, a loop, a missing file). The helper takes its proc root from
     `MEETING_MODE_PROC` for that test.
-- **`Service.qml`** runs it once per stream through the existing `runHelper`
-  path (a `Process`, asynchronous), keyed by `id + ":" + pid`, where `pid` is
-  the stream's `application.process.id`.
-  - The result is cached in `chains` under that key. A reused stream id with a
-    new pid is a new key.
+- **`Service.qml`** runs it once per stream through a separate
+  `ancestryProc` (a `Process`, asynchronous), not `runHelper`: that one parses
+  status JSON, overwrites `changed`, and has a single queued slot
+  (`Service.qml:191-215`).
+  - Requests go into a FIFO array, one run at a time; each result carries its
+    key. A result whose key is no longer a live stream is dropped.
+  - **The stream key** is `id + ":" + pid`, where `pid` is the stream's
+    `application.process.id`. *All* per-stream state uses this key:
+    `heldAt`, `confirmed`, `bindings`, `ended` and `chains`. A reused stream
+    id with a new pid starts fresh: no inherited window, hold time or
+    confirmation.
+  - The chain is cached in `chains` under that key.
   - The cache keeps the *chain*, not the window: a window that opens after its
     stream still binds when the toplevels change.
   - Entries for streams that are gone are dropped in `recompute()`.
@@ -39,13 +46,15 @@ writes the file.
 
 ### 2. Windows (A1, A2)
 
-- **The window list** comes from `Hyprland.toplevels`: for each, `pid`,
-  `stableId` and class from `lastIpcObject`, and the title.
+- **The window list** is a binding, `windows`, over
+  `Hyprland.toplevels.values`: for each toplevel, `pid`, `stableId` and class
+  from `lastIpcObject`, and the title. It re-evaluates when a window opens or
+  closes (`values`), a title changes, or a refresh updates `lastIpcObject`.
+  `onWindowsChanged` calls `recompute()`. (`Hyprland.toplevels` itself is a
+  constant model object, so `onToplevelsChanged` would never fire.) Today only
+  browser titles are watched (`Service.qml:78-89`).
   - When any toplevel lacks `pid` or `stableId`, `Service.qml` calls
-    `Hyprland.refreshToplevels()` once per change of the toplevel list (not per
-    tick), and recomputes when it answers.
-  - `onToplevelsChanged` (open, close) and title changes trigger
-    `recompute()`; today only browser titles do (`Service.qml:78-89`).
+    `Hyprland.refreshToplevels()` once per change of `values` (not per tick).
 - **`SettingsModel.candidates(chain, windows, s)`** (pure): the first pid in
   the chain that owns any windows gives the candidates. With more than one,
   only those whose title matches `meetingTitles` remain.
@@ -58,6 +67,14 @@ writes the file.
   stream.
 
 ### 3. Kind and confirmation (A3, A5)
+
+- **Which streams are looked at:** every ready capture stream that passes
+  `isCallStream(props, ".")` gets a chain and a binding, so a `webApps` window
+  can make a stream a call even when its app name matches neither list. Today
+  such a stream is dropped before any decision (`Service.qml:62`,
+  `SettingsModel.js:165`). Its kind is then, in order: `native` (name or
+  binary), `webapp` (bound window class), `browser` (name or binary), or
+  nothing.
 
 - **`webApps`**, a new setting, default `omateams|teams-for-linux`: a regex on
   the bound window's class.
@@ -81,8 +98,10 @@ writes the file.
 
 ### 4. The end (A4)
 
-- A stream stays a call while it exists *and* its bound window exists
-  (`confirmedIds` stays, `Service.qml:133`).
+- A stream stays a call while it exists *and* its bound window exists.
+  `confirmedIds` (`Service.qml:133`, booleans) becomes `confirmed`, stream key
+  → `by`: the way it was first confirmed is kept for as long as it stays a
+  call, so a tab switch keeps `callBy: "title"`.
 - When its bound window closes, the stream is marked `ended` until the stream
   goes away, and counts as `none`. A new window does not revive it: the call
   ends.
@@ -99,7 +118,7 @@ writes the file.
 | `callWindowState` | `SettingsModel.aggregate(streams)`: `bound` when every stream in `call` is bound to the same window; `ambiguous` when any is ambiguous or they differ; else `none` |
 | `callWindowClass` | the bound window's class |
 | `callWindowShowing` | `webapp`/native window: `true`; browser window: its title matches `meetingTitles` now |
-| `callBy` | `native`, `webapp`, `title` or `fallback`, from the stream that set `call` |
+| `callBy` | `native`, `webapp`, `title` or `fallback`: the kept `by` of the call stream confirmed first (stable while several are calls) |
 | `callWindowSeq` | incremented in `recompute()` whenever `callWindow` or `callWindowShowing` changes |
 
 - `writeState()` also runs when any of these change (today only `call`,
@@ -129,6 +148,9 @@ writes the file.
   meetingai's spec dropped it (A3).
 - **Picking the focused window among several candidates:** a guess; the
   contract says `ambiguous`.
+- **Reusing `runHelper` for ancestry:** it parses status JSON, overwrites
+  `changed` and keeps one queued call, so lookups would be lost or clobber a
+  pending `off`.
 
 ## Risks
 
@@ -152,6 +174,11 @@ writes the file.
   - `candidates`: first owning ancestor, title filtering, several left;
   - `bind`: held through a title change, never moved, dropped when the window
     closes, one/none/several candidates;
+  - stream keys: a reused stream id with a new pid inherits no window, hold
+    time or confirmation; a late ancestry result for a gone key is ignored;
+  - a stream unknown to both app lists becomes a call through a `webApps`
+    window class;
+  - `callBy` kept through a tab switch, and stable with two call streams;
   - `decide`: native, `webApps` by class, browser by its own title, fallback,
     another window's title ignored;
   - `aggregate`: one window, two streams on one window, two windows, an
