@@ -53,8 +53,18 @@ writes the file.
   `onWindowsChanged` calls `recompute()`. (`Hyprland.toplevels` itself is a
   constant model object, so `onToplevelsChanged` would never fire.) Today only
   browser titles are watched (`Service.qml:78-89`).
-  - When any toplevel lacks `pid` or `stableId`, `Service.qml` calls
-    `Hyprland.refreshToplevels()` once per change of `values` (not per tick).
+  - A newly opened toplevel has an empty `lastIpcObject` until
+    `Hyprland.refreshToplevels()` answers. When any toplevel lacks `pid` or
+    `stableId`, `Service.qml` calls it once per change of `values` (not per
+    tick). Quickshell drops a refresh asked for while one is in flight, so when
+    a refresh answers and a toplevel still lacks them, it asks once more.
+  - **No new binding while any toplevel is unrefreshed:** otherwise a stream
+    whose process already owns a window ("Zoom Workplace") could bind to it
+    before the new call window ("Zoom Meeting") shows its pid, and a binding
+    never moves. Existing bindings still hold and still end on close.
+  - **Pids are compared as numbers:** PipeWire gives
+    `application.process.id` as a string, Hyprland's `pid` is a number, and
+    the helper prints text.
 - **`SettingsModel.candidates(chain, windows, s)`** (pure): the first pid in
   the chain that owns any windows gives the candidates. With more than one,
   only those whose title matches `meetingTitles` remain.
@@ -77,7 +87,8 @@ writes the file.
   nothing.
 
 - **`webApps`**, a new setting, default `omateams|teams-for-linux`: a regex on
-  the bound window's class.
+  the bound window's class. Empty means off (an empty regex would match every
+  class), as an empty `meetingTitles` does; `normalize()` keeps `""`.
 - **`SettingsModel.decide()`** takes, per stream, `kind`, `heldMs`, and the
   stream's own `windowClass` and `windowTitle`:
   - `native` (app name or binary matches `nativeApps`): a call after 3 s, as
@@ -85,12 +96,14 @@ writes the file.
   - a bound window whose class matches `webApps`: a call after 3 s;
     `by: "webapp"`. This covers Teams as `omateams`, whose stream is "Chromium
     input".
-  - `browser`: a call once its *own* bound window's title matches
-    `meetingTitles` (`by: "title"`), or after `maybeDelay` (`by: "fallback"`);
-    `maybe` before.
+  - `browser`: after the same 3 s hold, a call once its *own* bound window's
+    title matches `meetingTitles` (`by: "title"`), or after `maybeDelay`
+    (`by: "fallback"`); `maybe` between 3 s and then, `none` before 3 s.
 - **Removed:** the global `confirmTitle(root.titles)` and `screenShared`
-  confirmation (`Service.qml:68-76`, `:126-127`). A title in another window and
-  a screen share confirm nothing.
+  confirmation (`Service.qml:68-76`, `:126-127`), with the `videoSources`
+  tracking that only fed it (`:47-54`, `:101`), and the "or screen share" in
+  the `browsers` hint (`Settings.qml:41`). A title in another window and a
+  screen share confirm nothing.
 - **Patterns:** `\| Microsoft Teams` is removed from the defaults;
   `^Zoom( Meeting| Workplace)?` becomes `^Zoom Meeting`.
   - `normalize()` migrates only a value equal to the old default, so a user's
@@ -100,8 +113,10 @@ writes the file.
 
 - A stream stays a call while it exists *and* its bound window exists.
   `confirmedIds` (`Service.qml:133`, booleans) becomes `confirmed`, stream key
-  → `by`: the way it was first confirmed is kept for as long as it stays a
-  call, so a tab switch keeps `callBy: "title"`.
+  → `by`: kept for as long as it stays a call, so a tab switch keeps
+  `callBy: "title"` and a later `maybeDelay` does not turn it into
+  `fallback`. `fallback` may still upgrade to `title` or `webapp` when its own
+  window later qualifies; nothing ever downgrades.
 - When its bound window closes, the stream is marked `ended` until the stream
   goes away, and counts as `none`. A new window does not revive it: the call
   ends.
@@ -115,12 +130,15 @@ writes the file.
 | Field | Source |
 |---|---|
 | `callWindow` | the `stableId` when `callWindowState` is `bound`, else `""` |
-| `callWindowState` | `SettingsModel.aggregate(streams)`: `bound` when every stream in `call` is bound to the same window; `ambiguous` when any is ambiguous or they differ; else `none` |
-| `callWindowClass` | the bound window's class |
-| `callWindowShowing` | `webapp`/native window: `true`; browser window: its title matches `meetingTitles` now |
-| `callBy` | `native`, `webapp`, `title` or `fallback`: the kept `by` of the call stream confirmed first (stable while several are calls) |
+| `callWindowState` | `SettingsModel.aggregate(streams)`: `none` when no stream is a call; `ambiguous` when any call stream is ambiguous or two are bound to different windows; `bound` when every call stream is bound to the same window; else (some call stream unbound) `none` |
+| `callWindowClass` | the bound window's class; `""` unless `bound` |
+| `callWindowShowing` | `false` unless `bound`. Native or `webapp` window: `true`; browser window: its title matches `meetingTitles` now |
+| `callBy` | the kept `by` of the call stream that sets `call`: any non-`fallback` stream outranks a `fallback` one; among equals, the one confirmed first. `""` when `call` is not `call` |
 | `callWindowSeq` | incremented in `recompute()` whenever `callWindow` or `callWindowShowing` changes |
 
+- **`SettingsModel.windowFields(streams, prev)`** (pure) computes these
+  fields and the next `callWindowSeq` from the previous ones, so the node
+  tests cover them; `stateObject()` merges its result.
 - `writeState()` also runs when any of these change (today only `call`,
   `callApp`, `callTitle`, `active`: `Service.qml:148-166`).
 - `callTitle` keeps today's meaning. Titles stay in memory and in the 0600
@@ -154,9 +172,9 @@ writes the file.
 
 ## Risks
 
-- **`lastIpcObject` may lack `pid` or `stableId`** until a refresh. Mitigation:
-  the refresh above; until it answers, the stream is unbound (`none`), never
-  wrongly bound.
+- **`lastIpcObject` lacks `pid` and `stableId`** for a new window until a
+  refresh answers. Mitigation: the refresh and its retry above, and no new
+  binding meanwhile; the stream reads as unbound (`none`) for that moment.
 - **Sandboxed apps** (Flatpak) may hide the parent chain: no window, and
   meetingai says "no meeting window".
 - **Chrome reports one audio process for all tabs** (meetingai F5, accepted):
@@ -178,7 +196,13 @@ writes the file.
     time or confirmation; a late ancestry result for a gone key is ignored;
   - a stream unknown to both app lists becomes a call through a `webApps`
     window class;
-  - `callBy` kept through a tab switch, and stable with two call streams;
+  - `callBy` kept through a tab switch and past `maybeDelay`; `fallback`
+    upgrades to `title`; a `title` stream outranks an older `fallback` one;
+  - no new binding while a toplevel is unrefreshed; an existing binding holds;
+  - pids compared as numbers (string from PipeWire, number from Hyprland);
+  - empty `webApps` matches nothing; a browser stream is `none` before 3 s;
+  - `windowFields`: class and showing empty unless `bound`; one call stream
+    unbound gives `none`; `callBy` `""` without a call;
   - `decide`: native, `webApps` by class, browser by its own title, fallback,
     another window's title ignored;
   - `aggregate`: one window, two streams on one window, two windows, an
@@ -186,8 +210,7 @@ writes the file.
   - the end: a closed bound window gives `none`; a title change does not;
   - patterns: "Chat | Microsoft Teams" and "Zoom Workplace" no longer match;
     `normalize()` migrates only the old default;
-  - `stateObject` fields and `callWindowSeq` moving on a window or showing
-    change.
+  - `callWindowSeq` moving on a window or showing change, and not otherwise.
 - `bash tests/actions.test.sh`: `ancestors` with `)` and spaces in the name,
   the 8-step limit, pid 1, a missing file.
 - `node tests/qml-text.test.js` and `nix flake check`.
