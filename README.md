@@ -103,7 +103,7 @@ omarchy-shell meeting-mode settings   # open the settings panel
 
 Right-click the indicator, or run `omarchy-shell meeting-mode settings`. Every action has its
 own switch, and you choose how long to wait after a call before putting things back
-(5 s, 15 s, 30 s or 1 min). You can also edit which apps count as calls, which are browsers,
+(5 s, 15 s, 30 s or 1 min). You can also edit which apps count as calls, which are web app windows and browsers,
 the meeting window titles that confirm a browser call, and how long a browser microphone may
 stay a "maybe" before it counts as a call. Changes apply from the next meeting.
 
@@ -126,24 +126,36 @@ be set there:
 ## Telling a call from microphone use
 
 Meeting mode only starts for a real call, so a voice note or a dictation tool does not turn
-on Do Not Disturb. What uses the microphone is sorted into three kinds:
+on Do Not Disturb. What uses the microphone is sorted into four kinds:
 
 - **Call apps** (`nativeApps`; Zoom, Teams, Discord, Vesktop, Slack, Signal, Webex, Cisco
   Collab Host, Element, Skype, Jitsi, Telegram): a call once the app has held the microphone for
   3 seconds.
+- **Web apps** (`webApps`; default `omateams` and `teams-for-linux`, matched against the window
+  class): an app that runs in its own window. A call once its window has held the microphone for
+  3 seconds. An empty `webApps` turns this off.
 - **Browsers** (`browsers`; Chrome and Chromium, Firefox, Brave, Vivaldi, Zen, LibreWolf,
   Edge): a **maybe** after 3 seconds, because a browser may record a voice message too. A maybe
-  becomes a **call** when something confirms it, or after `maybeDelay` seconds (default 60,
-  range 10 to 600).
+  becomes a **call** when its own window shows a meeting title, or after `maybeDelay` seconds
+  (default 60, range 10 to 600).
 - **Everything else** (OBS, Audacity, dictation tools, the nixarchy voice wake word): never a
   call.
 
-A browser call is confirmed by any of: a window title that matches a pattern in
-`meetingTitles` (one regular expression per line, case-sensitive; the defaults cover Google
-Meet, Teams, Zoom, Jitsi, Huddle, Webex, Messenger and WhatsApp calls), a screen share
-(a PipeWire `xdph-streaming-*` source). Only windows of the apps in `browsers` are looked at.
-A browser stream that has been a call stays one while that stream exists, so switching tabs does
-not end the meeting. An empty `meetingTitles` turns title confirmation off.
+Each microphone stream is tied to the window of the app that owns it: the service follows the
+stream's process up through its parents (`meeting-mode-actions ancestors <pid>`, once per stream)
+until it finds a process that owns windows. If several windows match, only those whose title
+matches `meetingTitles` are kept; if still more than one is left, the stream stays unbound
+(`ambiguous`). Once bound, a window never moves to another one.
+
+A browser call is confirmed when its own window's title matches a pattern in `meetingTitles`
+(one regular expression per line, case-sensitive; the defaults cover Google Meet, Teams in a
+browser, Zoom meetings, Jitsi, Huddle, Webex, Messenger and WhatsApp calls). Another window's
+title and screen sharing confirm nothing. A stream that has been a call stays one while it
+exists, so switching tabs does not end the meeting. An empty `meetingTitles` turns title
+confirmation off.
+
+A call also ends when its bound window closes, even if the microphone stream lingers; a new
+window does not revive it.
 
 Window titles are read in memory only. They are never written to a log or a notification; the
 only place a matched title appears is `callTitle` in the state file below, for browser calls, in
@@ -156,14 +168,23 @@ yourself.
 ### State file for other plugins
 
 The service writes `$XDG_RUNTIME_DIR/meeting-mode.json` (in your private `0700` runtime directory) whenever `call`, `callApp`,
-`callTitle` or `active` changes, and `omarchy-shell meeting-mode status` prints the same JSON:
+`callTitle`, `active` or the window fields below change, and `omarchy-shell meeting-mode status` prints the same JSON:
 
 ```json
 {"active": true, "reason": "Zoom", "since": 1788000000000,
  "updated": 1788000003000, "pid": 4242,
  "call": "call", "callApp": "Zoom", "callTitle": "", "callSince": 1788000000000,
- "callDetected": true}
+ "callDetected": true, "schema": 2, "callBy": "native",
+ "callWindowState": "bound", "callWindow": "0x5f3a", "callWindowClass": "zoom",
+ "callWindowShowing": true, "callWindowSeq": 1}
 ```
+
+`schema` is `2`. The window fields: `callBy` is what made it a call (`native`, `webapp`, `title`
+or `fallback`, `""` without a call); `callWindowState` is `none`, `bound` (every call stream
+belongs to one window) or `ambiguous`; `callWindow` (Hyprland's stable id) and `callWindowClass`
+are `""` unless `bound`; `callWindowShowing` is true when a native or web app is bound, or a
+browser window's title shows a meeting now; `callWindowSeq` goes up whenever `callWindow` or
+`callWindowShowing` changes. Readers that do not know `schema` 2 can ignore these fields.
 
 `call` is `none`, `maybe` or `call`; `callDetected` is `call === "call"`, kept for older readers.
 Times are milliseconds since the epoch; `pid` is the shell that wrote the file, so a reader can
@@ -176,8 +197,9 @@ meetingai plugin is not installed.
 
 The service is a small QML component inside `omarchy-shell`. It uses the shell's built-in
 PipeWire connection to see which apps have a microphone stream open, and its Hyprland
-connection to read window titles, so there is no polling and no extra process (a one-second
-timer runs only while a call app holds the microphone). It never opens the microphone itself and never touches audio: it only
+connection to read windows, so there is no polling (a one-second
+timer runs only while a call app holds the microphone; the process chain of a stream is read once,
+by a short helper run). It never opens the microphone itself and never touches audio: it only
 reads which apps are recording.
 
 The desktop changes are made by `bin/meeting-mode-actions`, a small shell script you can read

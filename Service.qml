@@ -44,105 +44,139 @@ Item {
         }
         return list;
     }
-    readonly property var videoSources: {
-        var list = [];
-        for (var i = 0; i < nodes.length; i++)
-            if (nodes[i] && nodes[i].type === PwNodeType.VideoSource)
-                list.push(nodes[i]);
-        return list;
-    }
-    PwObjectTracker { objects: root.captureStreams.concat(root.videoSources) }
+    PwObjectTracker { objects: root.captureStreams }
 
-    // Capture streams of a call app, each with its kind (native | browser).
-    readonly property var qualifying: {
+    // Ready capture streams with their owning pid (a string or number; the
+    // model compares it as a number).
+    readonly property var streams: {
         var out = [];
         for (var i = 0; i < captureStreams.length; i++) {
             var n = captureStreams[i];
             if (!n.ready) continue;
-            var kind = SettingsModel.classify(n.properties, root.settings);
-            if (kind !== "")
-                out.push({ id: n.id, kind: kind, app: SettingsModel.callAppName(n.properties) });
-        }
-        return out;
-    }
-    // An xdph screen share is a Video/Source named xdph-streaming-*.
-    readonly property bool screenShared: {
-        for (var i = 0; i < videoSources.length; i++) {
-            var p = videoSources[i].ready ? videoSources[i].properties : null;
-            if (p && p["media.class"] === "Video/Source" && String(p["media.name"] || "").indexOf("xdph-streaming-") === 0)
-                return true;
-        }
-        return false;
-    }
-    // Titles of browser windows only, kept in memory; never logged or notified.
-    readonly property var titles: {
-        var out = [];
-        var tl = Hyprland.toplevels ? Hyprland.toplevels.values : [];
-        var browsers = new RegExp(root.settings.browsers, "i");
-        for (var i = 0; i < tl.length; i++) {
-            if (!tl[i]) continue;
-            var cls = tl[i].wayland && tl[i].wayland.appId ? tl[i].wayland.appId : (tl[i].lastIpcObject ? tl[i].lastIpcObject["class"] : "");
-            if (browsers.test(String(cls || "")))
-                out.push(String(tl[i].title || ""));
+            var p = n.properties || {};
+            out.push({ id: n.id, pid: p["application.process.id"], props: p });
         }
         return out;
     }
 
-    property var heldAt: ({})          // stream id -> when we first saw it
-    property var confirmedIds: ({})    // stream ids that have been a call: they stay one
+    // Toplevel windows: titles stay in memory and the 0600 state file only.
+    readonly property var windows: {
+        var out = [];
+        var tl = Hyprland.toplevels ? Hyprland.toplevels.values : [];
+        for (var i = 0; i < tl.length; i++) {
+            if (!tl[i]) continue;
+            var o = tl[i].lastIpcObject || {};
+            out.push({
+                pid: o.pid,
+                stableId: String(o.stableId || ""),
+                cls: String(o["class"] || (tl[i].wayland && tl[i].wayland.appId) || ""),
+                title: String(tl[i].title || ""),
+                refreshed: o.pid !== undefined && !!o.stableId
+            });
+        }
+        return out;
+    }
+
+    // Refresh the toplevels' IPC data once per change of the list, and again
+    // after an answer that left some unrefreshed (Quickshell drops a refresh
+    // asked while one is in flight). A window that never refreshes stops it.
+    property int askedUnrefreshed: 0
+    function unrefreshed() {
+        var n = 0;
+        for (var i = 0; i < root.windows.length; i++)
+            if (!root.windows[i].refreshed) n++;
+        return n;
+    }
+    Connections {
+        target: Hyprland.toplevels
+        function onValuesChanged() {
+            root.askedUnrefreshed = root.unrefreshed();
+            if (root.askedUnrefreshed > 0) Hyprland.refreshToplevels();
+        }
+    }
+    onWindowsChanged: {
+        var n = root.unrefreshed();
+        if (n > 0 && n < root.askedUnrefreshed) {
+            root.askedUnrefreshed = n;
+            Hyprland.refreshToplevels();
+        }
+        root.recompute();
+    }
+
+    property var model: ({ heldAt: {}, confirmed: {}, bindings: {}, ended: {}, chains: {}, fields: {} })
+    property var fields: ({ callWindowState: "none", callWindow: "", callWindowClass: "", callWindowShowing: false, callWindowSeq: 0, callBy: "" })
+    property bool timerNeeded: false
     property string call: "none"       // none | maybe | call
     property string callApp: ""
     property string callTitle: ""
     property double callSince: 0
     readonly property bool callDetected: call === "call"
 
-    onQualifyingChanged: recompute()
-    onTitlesChanged: recompute()
-    onScreenSharedChanged: recompute()
+    onStreamsChanged: recompute()
     onSettingsChanged: recompute()
 
     // The 1 s tick exists only for the 3 s and maybeDelay thresholds.
     Timer {
         interval: 1000
         repeat: true
-        running: root.qualifying.length > 0
+        running: root.timerNeeded
         onTriggered: root.recompute()
     }
 
     function recompute() {
-        var q = root.qualifying;
-        var best = { call: "none", app: "", title: "" };
-        if (q.length === 0) {
-            root.heldAt = {};
-            root.confirmedIds = {};
-        } else {
-            var now = Date.now();
-            var held = {};
-            var sure = {};
-            for (var i = 0; i < q.length; i++) {
-                held[q[i].id] = root.heldAt[q[i].id] || now;
-                if (root.confirmedIds[q[i].id]) sure[q[i].id] = true;
-            }
-            var title = SettingsModel.confirmTitle(root.titles, root.settings);
-            var confirmed = title !== "" || root.screenShared;
-            var rank = { none: 0, maybe: 1, call: 2 };
-            for (var j = 0; j < q.length; j++) {
-                var d = SettingsModel.decide({ kind: q[j].kind, heldMs: now - held[q[j].id], confirmed: confirmed, title: title }, root.settings);
-                // A stream that has been a call stays one while it exists, so a
-                // tab switch does not end the meeting.
-                if (d.call === "call") sure[q[j].id] = true;
-                else if (sure[q[j].id]) d = { call: "call", title: "" };
-                if (rank[d.call] > rank[best.call])
-                    best = { call: d.call, app: q[j].app, title: d.title };
-            }
-            root.heldAt = held;
-            root.confirmedIds = sure;
-        }
-        if (best.call === "none") root.callSince = 0;
+        var r = SettingsModel.step(root.model, { streams: root.streams, chains: root.model.chains, windows: root.windows }, Date.now(), root.settings);
+        root.model = r;
+        r.needChain.forEach(root.queueAncestry);
+        if (r.call === "none") root.callSince = 0;
         else if (root.call === "none") root.callSince = Date.now();
-        root.callApp = best.app;
-        root.callTitle = best.title;
-        root.call = best.call;
+        if (JSON.stringify(r.fields) !== JSON.stringify(root.fields)) root.fields = r.fields;
+        root.timerNeeded = r.timerNeeded;
+        root.callApp = r.callApp;
+        root.callTitle = r.callTitle;
+        root.call = r.call;
+    }
+
+    onFieldsChanged: root.writeState()
+
+    // --- process ancestry: one run per stream key, one at a time -------------
+    property var ancQueue: []          // [{key, pid}]
+    property string ancKey: ""         // the key being looked up
+    property bool ancOutput: false     // its output has not been read yet
+    function queueAncestry(item) {
+        if (item.key === root.ancKey) return;
+        for (var i = 0; i < root.ancQueue.length; i++)
+            if (root.ancQueue[i].key === item.key) return;
+        root.ancQueue = root.ancQueue.concat([item]);
+        root.nextAncestry();
+    }
+    function nextAncestry() {
+        // Both the exit and the output must be in: their order is not fixed.
+        if (ancestryProc.running || root.ancOutput || root.ancQueue.length === 0) return;
+        var item = root.ancQueue[0];
+        root.ancQueue = root.ancQueue.slice(1);
+        root.ancKey = item.key;
+        root.ancOutput = true;
+        ancestryProc.command = [root.helper, "ancestors", String(item.pid)];
+        ancestryProc.running = true;
+    }
+    Process {
+        id: ancestryProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var key = root.ancKey;
+                // Only a stream that still exists keeps its chain.
+                if (key !== "" && root.model.heldAt[key] !== undefined) {
+                    var chain = String(text).split("\n").filter(function(l) { return l !== ""; }).map(Number);
+                    var chains = Object.assign({}, root.model.chains);
+                    chains[key] = chain;
+                    root.model = Object.assign({}, root.model, { chains: chains });
+                    root.recompute();
+                }
+                root.ancOutput = false;
+                if (!ancestryProc.running) { root.ancKey = ""; root.nextAncestry(); }
+            }
+        }
+        onRunningChanged: if (!running && !root.ancOutput) { root.ancKey = ""; root.nextAncestry(); }
     }
 
     onCallChanged: {
@@ -352,6 +386,13 @@ Item {
             callDetected: root.callDetected,
             callApp: root.callApp,
             callTitle: root.callTitle,
+            schema: 2,
+            callWindow: root.fields.callWindow,
+            callWindowState: root.fields.callWindowState,
+            callWindowClass: root.fields.callWindowClass,
+            callWindowShowing: root.fields.callWindowShowing,
+            callBy: root.fields.callBy,
+            callWindowSeq: root.fields.callWindowSeq,
             callSince: root.callSince,
             since: root.since,
             changed: root.changed,

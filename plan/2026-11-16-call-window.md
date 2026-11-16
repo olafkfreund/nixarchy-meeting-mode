@@ -239,6 +239,13 @@ need not be opened.
 
    Results go into meetingai PR #102.
 
+## Implementation notes
+
+- *Step 1 (Codex):* `confirmed` also upgrades `title` → `webapp` (the window class is the stronger signal); `matches()` returns false for an empty pattern or empty text.
+- *Step 3 (coder, deviation):* the refresh is asked again from `onWindowsChanged` only while the number of unrefreshed windows has fallen since the last ask, so a window that never refreshes cannot cause a refresh loop. The chain cache lives in the stored `step()` state (`model.chains`), which `step()` prunes to live streams.
+- *Step 3 (lead fix):* the next ancestry run starts only after both the process exit and its output are in, in either order; otherwise a late output was read with a cleared key, dropped, and asked again forever.
+- *Step 4 (coder):* README also gained a short paragraph on binding a stream to its window and the end on window close.
+
 ## Tests
 
 - `node tests/model.test.js`, `node tests/qml-text.test.js`,
