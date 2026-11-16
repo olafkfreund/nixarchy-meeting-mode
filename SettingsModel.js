@@ -234,29 +234,39 @@ function candidates(chain, windows, s) {
     return [];
 }
 
-function bind(prev, cands, windows, refreshedAll, wasAmbiguous) {
+function bind(prev, cands, windows, refreshedAll, wasAmbiguous, prevHow, s) {
+    var titled = function(w) { return !!s && confirmTitle([w.title], s) !== ""; };
     if (prev) {
-        for (var i = 0; i < windows.length; i++)
-            if (windows[i].stableId === prev) return { stableId: prev, ambiguous: false };
-        return { stableId: "", ambiguous: false };
+        var held = windows.filter(function(w) { return w.stableId === prev; })[0];
+        if (!held) return { stableId: "", ambiguous: false, how: "" };
+        // A sole binding moves once, to the single title window of the same pid; a title binding never moves.
+        if (prevHow === "sole" && refreshedAll && s) {
+            var titles = cands.filter(function(w) { return titled(w) && Number(w.pid) === Number(held.pid); });
+            if (titles.length === 1) return { stableId: titles[0].stableId, ambiguous: false, how: "title" };
+        }
+        return { stableId: prev, ambiguous: false, how: prevHow || "" };
     }
     // While a window is unrefreshed nothing new binds; an ambiguous stream stays ambiguous meanwhile.
-    if (!refreshedAll) return { stableId: "", ambiguous: !!wasAmbiguous };
-    return { stableId: cands.length === 1 ? cands[0].stableId : "", ambiguous: cands.length > 1 };
+    if (!refreshedAll) return { stableId: "", ambiguous: !!wasAmbiguous, how: "" };
+    var one = cands.length === 1;
+    return { stableId: one ? cands[0].stableId : "", ambiguous: cands.length > 1, how: one ? (titled(cands[0]) ? "title" : "sole") : "" };
 }
 
 function windowFields(calls, prev, s) {
     var old = prev || {};
-    var ids = calls.map(function(c) { return c.binding.stableId; });
+    // A native call with its window closed to the tray has no window to show; it must not hide another call's window.
+    var ids = calls.filter(function(c) { return c.binding.stableId !== "" || c.binding.ambiguous || c.kind !== "native"; })
+        .map(function(c) { return c.binding.stableId; });
     var state = "none";
     var boundIds = ids.filter(function(id) { return id !== ""; });
     if (calls.some(function(c) { return c.binding.ambiguous; }) ||
         boundIds.some(function(id) { return id !== boundIds[0]; }))
         state = "ambiguous";
-    else if (calls.length && ids.every(function(id) { return id !== ""; })) state = "bound";
-    var window = state === "bound" ? calls[0].window : null;
+    else if (ids.length && ids.every(function(id) { return id !== ""; })) state = "bound";
+    var window = state === "bound" ? calls.filter(function(c) { return c.binding.stableId !== ""; })[0].window : null;
+    // Only calls bound to that window say whether it shows the meeting: an unbound native call must not.
     var showing = state === "bound" && calls.some(function(c) {
-        return c.kind !== "browser" || confirmTitle([c.window.title], s) !== "";
+        return c.binding.stableId === window.stableId && (c.kind !== "browser" || confirmTitle([c.window.title], s) !== "");
     });
     var id = window ? window.stableId : "";
     return {
@@ -270,7 +280,7 @@ function windowFields(calls, prev, s) {
 
 function step(prev, input, now, s) {
     prev = prev || {};
-    var heldAt = {}, confirmed = {}, bindings = {}, ended = {}, chains = {}, ambiguous = {};
+    var heldAt = {}, confirmed = {}, bindings = {}, bindHow = {}, ended = {}, chains = {}, ambiguous = {};
     var windows = input.windows || [], streams = input.streams || [];
     var refreshedAll = windows.every(function(w) { return w.refreshed; });
     var needChain = [], calls = [], ranked = [], timerNeeded = false;
@@ -286,9 +296,10 @@ function step(prev, input, now, s) {
             else needChain.push({ key: key, pid: pid });
         }
         var previous = prev.bindings && prev.bindings[key] || "";
-        var binding = Number.isFinite(pid) && pid > 0 && !ended[key] ? bind(previous, candidates(chains[key], windows, s), windows, refreshedAll, prev.ambiguous && prev.ambiguous[key]) : { stableId: "", ambiguous: false };
-        if (previous && !binding.stableId) ended[key] = true;
-        if (binding.stableId) bindings[key] = binding.stableId;
+        var binding = Number.isFinite(pid) && pid > 0 && !ended[key] ? bind(previous, candidates(chains[key], windows, s), windows, refreshedAll, prev.ambiguous && prev.ambiguous[key], prev.bindHow && prev.bindHow[key], s) : { stableId: "", ambiguous: false, how: "" };
+        // Only browser and webapp streams end with their window; a native app keeps its mic stream and may bind again.
+        if (previous && !binding.stableId && kindOf(stream.props, undefined, s) !== "native") ended[key] = true;
+        if (binding.stableId) { bindings[key] = binding.stableId; bindHow[key] = binding.how; }
         if (binding.ambiguous) ambiguous[key] = true;
         // An unbound stream has no window: "" must not match an unrefreshed window's empty id.
         var window = binding.stableId ? windows.filter(function(w) { return w.stableId === binding.stableId; })[0] : undefined;
@@ -323,7 +334,7 @@ function step(prev, input, now, s) {
     });
     var winner = ranked[0], fields = windowFields(calls, prev.fields, s);
     fields.callBy = winner && winner.level === "call" ? winner.confirmation.by : "";
-    return { heldAt: heldAt, confirmed: confirmed, bindings: bindings, ended: ended, chains: chains, ambiguous: ambiguous,
+    return { heldAt: heldAt, confirmed: confirmed, bindings: bindings, bindHow: bindHow, ended: ended, chains: chains, ambiguous: ambiguous,
              fields: fields, call: winner ? winner.level : "none",
              callApp: winner ? callAppName(winner.props) : "",
              callTitle: winner && winner.level === "call" && winner.kind === "browser" && winner.window ? confirmTitle([winner.window.title], s) : "",

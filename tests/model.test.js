@@ -337,4 +337,71 @@ test("an ambiguous call stays ambiguous while a new window is unrefreshed", () =
   assert.strictEqual(next.fields.callWindowState, "ambiguous");
 });
 
+test("a native stream survives its window closing and may bind again; browser and webapp still end", () => {
+  const ss = [stream(1, 12, "Discord", "discord")], chain = { "1:12": [12] };
+  const a = run({}, ss, [win(12, "a", "Discord", "discord")], chain, 0);
+  const b = run(a, ss, [win(12, "a", "Discord", "discord")], chain, 4000);
+  assert.strictEqual(b.call, "call");
+  const closed = run(b, ss, [], chain, 5000);
+  assert.strictEqual(closed.call, "call");
+  assert.strictEqual(closed.fields.callWindowState, "none");
+  assert.strictEqual(closed.ended["1:12"], undefined);
+  assert.deepStrictEqual(closed.bindings, {});
+  const again = run(closed, ss, [win(12, "n", "Discord", "discord")], chain, 6000);
+  assert.strictEqual(again.call, "call");
+  assert.strictEqual(again.bindings["1:12"], "n");
+  assert.strictEqual(again.fields.callWindowState, "bound");
+  const web = [stream(2, 13)], wc = { "2:13": [13] };
+  const w = run(run({}, web, [win(13, "w", "Zoom Meeting")], wc, 0), web, [], wc, 1000);
+  assert.strictEqual(w.ended["2:13"], true);
+  const app = [stream(3, 14, "Unknown", "unknown")], ac = { "3:14": [14] };
+  const aw = [win(14, "o", "Inbox", "omateams")];
+  const wa = run(run(run({}, app, aw, ac, 0), app, aw, ac, 4000), app, [], ac, 5000);
+  assert.strictEqual(wa.ended["3:14"], true);
+});
+
+test("a native call with no window does not hide another bound call's window", () => {
+  const ss = [stream(1, 12, "Discord", "discord"), stream(2, 13)], chain = { "1:12": [12], "2:13": [13] };
+  const ws = [win(13, "m", "Meet - abc-defg-hij")];
+  const a = run({}, ss, ws, chain, 0);
+  const b = run(a, ss, ws, chain, 4000);
+  assert.strictEqual(b.fields.callWindowState, "bound");
+  assert.strictEqual(b.fields.callWindow, "m");
+  assert.strictEqual(b.fields.callWindowShowing, true);
+  // A tab switch in the Meet window: the unbound native call must not keep it "showing".
+  const tabbed = [win(13, "m", "Inbox")];
+  const c = run(b, ss, tabbed, chain, 5000);
+  assert.strictEqual(c.fields.callWindowState, "bound");
+  assert.strictEqual(c.fields.callWindowShowing, false);
+});
+
+test("a sole binding moves once to the single title window of its pid; a title binding never moves", () => {
+  const ss = [stream(1, 12, "Zoom", "zoom")], chain = { "1:12": [12] };
+  const wp = win(12, "wp", "Zoom Workplace", "zoom");
+  const a = run({}, ss, [wp], chain, 0);
+  assert.strictEqual(a.bindings["1:12"], "wp");
+  assert.strictEqual(a.bindHow["1:12"], "sole");
+  // a toplevel still unrefreshed: no move
+  const pending = { pid: undefined, stableId: "", cls: "zoom", title: "", refreshed: false };
+  const meeting = win(12, "m", "Zoom Meeting", "zoom");
+  const held = run(a, ss, [wp, meeting, pending], chain, 1000);
+  assert.strictEqual(held.bindings["1:12"], "wp");
+  assert.strictEqual(held.bindHow["1:12"], "sole");
+  const moved = run(held, ss, [wp, meeting], chain, 4000);
+  assert.strictEqual(moved.bindings["1:12"], "m");
+  assert.strictEqual(moved.bindHow["1:12"], "title");
+  assert.strictEqual(moved.call, "call");
+  const more = run(moved, ss, [wp, meeting, win(12, "m2", "Zoom Meeting", "zoom")], chain, 3000);
+  assert.strictEqual(more.bindings["1:12"], "m");
+  assert.strictEqual(more.bindHow["1:12"], "title");
+  // chosen by title from the start: never moves
+  const t = run({}, ss, [wp, meeting], chain, 0);
+  assert.strictEqual(t.bindHow["1:12"], "title");
+  const t2 = run(t, ss, [wp, meeting, win(12, "m2", "Jitsi Meet", "zoom")], chain, 1000);
+  assert.strictEqual(t2.bindings["1:12"], "m");
+  // old state without bindHow never moves
+  const old = { ...a, bindHow: undefined };
+  assert.strictEqual(run(old, ss, [wp, meeting], chain, 2000).bindings["1:12"], "wp");
+});
+
 console.log(`model: ${n} tests passed`);
