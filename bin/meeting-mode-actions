@@ -4,6 +4,7 @@
 #   meeting-mode-actions on <action,...>   apply the listed actions
 #   meeting-mode-actions off               undo exactly what "on" changed
 #   meeting-mode-actions status            print {"active":…,"changed":[…]}
+#   meeting-mode-actions ancestors <pid>   print the pid, then each parent, one per line
 #
 # Actions: dnd, awake, nightlight, voice. Each one is recorded only if it
 # actually changed something, so "off" never turns off a setting that was
@@ -83,9 +84,23 @@ status() {
   jq -cn --argjson a "$([[ -e "$active" ]] && echo true || echo false)" --argjson c "$list" '{active: $a, changed: $c}'
 }
 
+# Pure bash: the stat name field may hold spaces and ")", so cut at the last ") ".
+# Stops after 8 parents, at pid 1, at a repeat, or when a read fails.
+ancestors() {
+  local pid=${1:-} seen=" " line _
+  for _ in 0 1 2 3 4 5 6 7 8; do
+    [[ $pid =~ ^[0-9]+$ && $pid -gt 0 && $seen != *" $pid "* ]] || return 0
+    echo "$pid"; seen+="$pid "
+    [[ $pid -eq 1 ]] && return 0
+    read -r line 2>/dev/null <"${MEETING_MODE_PROC:-/proc}/$pid/stat" || return 0
+    line=${line##*) }; line=${line#* }; pid=${line%% *}
+  done
+}
+
 case "${1:-status}" in
   on)     turn_on "${2:-}"; status ;;
   off)    turn_off; status ;;
   status) status ;;
-  *) echo "usage: meeting-mode-actions on <dnd,awake,nightlight,voice> | off | status" >&2; exit 2 ;;
+  ancestors) ancestors "${2:-}" ;;
+  *) echo "usage: meeting-mode-actions on <dnd,awake,nightlight,voice> | off | status | ancestors <pid>" >&2; exit 2 ;;
 esac

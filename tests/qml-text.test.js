@@ -35,6 +35,15 @@ svc.forEach((line, i) => {
   if (/notify-send|root\.notify\(/.test(line) && /[tT]itles?\b/.test(line.replace(/title, body/, ""))) { failures++; console.log(`FAIL: Service.qml:${i + 1} title in notification`); }
 });
 
+// ancestors has its own queue: never through runHelper (it parses status JSON).
+svc.forEach((line, i) => {
+  if (/runHelper\(/.test(line) && /ancestors/.test(line)) { failures++; console.log(`FAIL: Service.qml:${i + 1} ancestors through runHelper`); }
+});
+if (!svc.some(l => /"ancestors"/.test(l) && !/runHelper/.test(l))) { failures++; console.log("FAIL: Service.qml has no ancestors run"); }
+// Nothing started from the 1 s timer except recompute().
+const t = svc.join("\n").match(/Timer \{\s*interval: 1000\s*repeat: true[^}]*\}/);
+if (!t || !/onTriggered: root\.recompute\(\)\s*$/.test(t[0].trim().replace(/\s*\}$/, ""))) { failures++; console.log("FAIL: the 1 s timer does more than recompute()"); }
+
 if (checked === 0) {
   console.log("FAIL: no Text items found");
   process.exit(1);

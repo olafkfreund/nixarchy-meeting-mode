@@ -38,7 +38,8 @@ Item {
         { key: "notify", label: "Notifications", hint: "Say when meeting mode starts and ends", toggle: true },
         { key: "endDelay", label: "After a call ends", hint: "Wait this long before putting everything back", options: SettingsModel.END_DELAY_OPTIONS },
         { key: "nativeApps", label: "Call apps", hint: "Apps that count as a call as soon as they use the microphone (regular expression, matched against the app name)", text: true },
-        { key: "browsers", label: "Browsers", hint: "A browser on the microphone is only a maybe until a meeting window or screen share confirms it, or the delay below passes", text: true },
+        { key: "webApps", label: "Web app windows", hint: "Window classes that count as a call as soon as their window uses the microphone (regular expression). Empty means none.", text: true },
+        { key: "browsers", label: "Browsers", hint: "A browser on the microphone is only a maybe until its own window shows a meeting title, or the delay below passes", text: true },
         { key: "meetingTitles", label: "Meeting window titles", hint: "One regular expression per line, matched against window titles. Titles are never logged. Empty means no title confirmation.", text: true, multiline: true },
         { key: "maybeDelay", label: "Treat browser mic as a call after (s)", hint: "10 to 600 seconds", text: true, number: true }
     ]

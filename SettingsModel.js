@@ -13,9 +13,10 @@ var DEFAULTS = {
     endDelay: 15,           // seconds without a call before everything is put back
     notify: true,           // a notification when meeting mode starts and ends
     nativeApps: "zoom|teams-for-linux|teams|discord|vesktop|slack|signal|webex|CiscoCollabHost|element|skype|jitsi|telegram",
+    webApps: "omateams|teams-for-linux|zoom\\.us",
     browsers: "chrom|firefox|brave|vivaldi|zen|librewolf|edge",
     // one regex per line, matched (case-sensitive) against window titles
-    meetingTitles: "^Meet - [a-z]{3}-[a-z]{4}-[a-z]{3}\n\\| Microsoft Teams\n^Zoom( Meeting| Workplace)?\nJitsi Meet\nHuddle\nWebex\nMessenger call\nWhatsApp.*[Cc]all",
+    meetingTitles: "^Meet - [a-z]{3}-[a-z]{4}-[a-z]{3}\n^Zoom Meeting\nJitsi Meet\nHuddle\nWebex\nMessenger call\nWhatsApp.*[Cc]all",
     maybeDelay: 60,         // seconds a browser mic counts as "maybe" before it is a call
     onStart: "",            // optional shell command run when a meeting starts
     onEnd: ""               // optional shell command run when it ends
@@ -34,6 +35,7 @@ var END_DELAY_OPTIONS = [
 var START_AFTER = 3;
 
 var OLD_CALL_APPS = "chrom|firefox|brave|vivaldi|zen|librewolf|zoom|teams|slack|webex|discord|skype|jitsi|signal|telegram|element";
+var OLD_MEETING_TITLES = "^Meet - [a-z]{3}-[a-z]{4}-[a-z]{3}\n\\| Microsoft Teams\n^Zoom( Meeting| Workplace)?\nJitsi Meet\nHuddle\nWebex\nMessenger call\nWhatsApp.*[Cc]all";
 
 function validRegex(p, flags) {
     try {
@@ -60,6 +62,7 @@ function rx(src, flags) {
 
 // Never throws: an invalid pattern matches nothing.
 function matches(src, flags, text) {
+    if (!src || !text) return false;
     var r = rx(src, flags);
     return r !== null && r.test(text);
 }
@@ -114,9 +117,11 @@ function normalize(raw) {
     }
     if (typeof e.nativeApps === "string" && e.nativeApps.trim() !== "" && validRegex(e.nativeApps.trim(), "i")) native = e.nativeApps.trim();
     if (typeof e.browsers === "string" && e.browsers.trim() !== "" && validRegex(e.browsers.trim(), "i")) browsers = e.browsers.trim();
+    var webApps = DEFAULTS.webApps;
+    if (typeof e.webApps === "string" && validRegex(e.webApps.trim(), "i")) webApps = e.webApps.trim();
     // Missing: the defaults. An empty string is a choice: no title confirmation.
     var titles = DEFAULTS.meetingTitles;
-    if (typeof e.meetingTitles === "string") {
+    if (typeof e.meetingTitles === "string" && e.meetingTitles !== OLD_MEETING_TITLES) {
         var lines = e.meetingTitles.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l !== ""; });
         var good = lines.filter(function(l) { return validRegex(l); });
         if (good.length || !lines.length) titles = good.join("\n");
@@ -125,6 +130,7 @@ function normalize(raw) {
     maybe = isFinite(maybe) && e.maybeDelay !== "" && e.maybeDelay !== null ? Math.max(10, Math.min(600, Math.round(maybe))) : DEFAULTS.maybeDelay;
     return {
         nativeApps: native,
+        webApps: webApps,
         browsers: browsers,
         meetingTitles: titles,
         maybeDelay: maybe,
@@ -196,6 +202,149 @@ function callAppName(props) {
     return name !== "" ? name : "a call app";
 }
 
+function streamKey(id, pid) {
+    return id + ":" + pid;
+}
+
+function parentFromStat(text) {
+    var end = String(text).lastIndexOf(") ");
+    if (end < 0) return null;
+    var fields = text.slice(end + 2).trim().split(/\s+/);
+    var pid = Number(fields[1]);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function kindOf(props, windowClass, s) {
+    if (!isCallStream(props, ".")) return "";
+    var who = String(props["application.name"] || "") + " " + String(props["application.process.binary"] || "");
+    if (matches(s.nativeApps, "i", who)) return "native";
+    if (matches(s.webApps, "i", String(windowClass || ""))) return "webapp";
+    if (matches(s.browsers, "i", who)) return "browser";
+    return "";
+}
+
+function candidates(chain, windows, s) {
+    for (var i = 0; i < (chain || []).length; i++) {
+        var owned = (windows || []).filter(function(w) { return Number(w.pid) === Number(chain[i]) && Number(chain[i]) > 0; });
+        if (owned.length) {
+            if (owned.length === 1) return owned;
+            // One process, several windows (a browser): only a meeting title or a web-app class names the call's window.
+            return owned.filter(function(w) { return strongWindow(w, s); });
+        }
+    }
+    return [];
+}
+
+function strongWindow(w, s) {
+    return !!s && (confirmTitle([w.title], s) !== "" || matches(s.webApps, "i", String(w.cls || "")));
+}
+function bind(prev, cands, windows, refreshedAll, wasAmbiguous, prevHow, s) {
+    var titled = function(w) { return strongWindow(w, s); };
+    if (prev) {
+        var held = windows.filter(function(w) { return w.stableId === prev; })[0];
+        if (!held) return { stableId: "", ambiguous: false, how: "" };
+        // A sole binding moves once, to the single title window of the same pid; a title binding never moves.
+        if (prevHow === "sole" && refreshedAll && s) {
+            var titles = cands.filter(function(w) { return titled(w) && Number(w.pid) === Number(held.pid); });
+            if (titles.length === 1) return { stableId: titles[0].stableId, ambiguous: false, how: "title" };
+        }
+        return { stableId: prev, ambiguous: false, how: prevHow || "" };
+    }
+    // While a window is unrefreshed nothing new binds; an ambiguous stream stays ambiguous meanwhile.
+    if (!refreshedAll) return { stableId: "", ambiguous: !!wasAmbiguous, how: "" };
+    var one = cands.length === 1;
+    return { stableId: one ? cands[0].stableId : "", ambiguous: cands.length > 1, how: one ? (titled(cands[0]) ? "title" : "sole") : "" };
+}
+
+function windowFields(calls, prev, s) {
+    var old = prev || {};
+    // A native call with its window closed to the tray has no window to show; it must not hide another call's window.
+    var ids = calls.filter(function(c) { return c.binding.stableId !== "" || c.binding.ambiguous || c.kind !== "native"; })
+        .map(function(c) { return c.binding.stableId; });
+    var state = "none";
+    var boundIds = ids.filter(function(id) { return id !== ""; });
+    if (calls.some(function(c) { return c.binding.ambiguous; }) ||
+        boundIds.some(function(id) { return id !== boundIds[0]; }))
+        state = "ambiguous";
+    else if (ids.length && ids.every(function(id) { return id !== ""; })) state = "bound";
+    var window = state === "bound" ? calls.filter(function(c) { return c.binding.stableId !== ""; })[0].window : null;
+    // Only calls bound to that window say whether it shows the meeting: an unbound native call must not.
+    var showing = state === "bound" && calls.some(function(c) {
+        return c.binding.stableId === window.stableId && (c.kind !== "browser" || confirmTitle([c.window.title], s) !== "");
+    });
+    var id = window ? window.stableId : "";
+    return {
+        callWindowState: state,
+        callWindow: id,
+        callWindowClass: window ? String(window.cls || "") : "",
+        callWindowShowing: showing,
+        callWindowSeq: (old.callWindowSeq || 0) + ((old.callWindow || "") !== id || (old.callWindowShowing || false) !== showing ? 1 : 0)
+    };
+}
+
+function step(prev, input, now, s) {
+    prev = prev || {};
+    var heldAt = {}, confirmed = {}, bindings = {}, bindHow = {}, ended = {}, chains = {}, ambiguous = {};
+    var windows = input.windows || [], streams = input.streams || [];
+    var refreshedAll = windows.every(function(w) { return w.refreshed; });
+    var needChain = [], calls = [], ranked = [], timerNeeded = false;
+    streams.forEach(function(stream) {
+        if (!isCallStream(stream.props, ".")) return;
+        var pid = Number(stream.pid);
+        var key = streamKey(stream.id, stream.pid);
+        heldAt[key] = prev.heldAt && prev.heldAt[key] !== undefined ? prev.heldAt[key] : now;
+        if (prev.ended && prev.ended[key]) ended[key] = true;
+        if (prev.confirmed && prev.confirmed[key]) confirmed[key] = prev.confirmed[key];
+        if (Number.isFinite(pid) && pid > 0) {
+            if (Object.prototype.hasOwnProperty.call(input.chains || {}, key)) chains[key] = input.chains[key];
+            else needChain.push({ key: key, pid: pid });
+        }
+        var previous = prev.bindings && prev.bindings[key] || "";
+        var binding = Number.isFinite(pid) && pid > 0 && !ended[key] ? bind(previous, candidates(chains[key], windows, s), windows, refreshedAll, prev.ambiguous && prev.ambiguous[key], prev.bindHow && prev.bindHow[key], s) : { stableId: "", ambiguous: false, how: "" };
+        // Only browser and webapp streams end with their window; a native app keeps its mic stream and may bind again.
+        if (previous && !binding.stableId && kindOf(stream.props, undefined, s) !== "native") ended[key] = true;
+        if (binding.stableId) { bindings[key] = binding.stableId; bindHow[key] = binding.how; }
+        if (binding.ambiguous) ambiguous[key] = true;
+        // An unbound stream has no window: "" must not match an unrefreshed window's empty id.
+        var window = binding.stableId ? windows.filter(function(w) { return w.stableId === binding.stableId; })[0] : undefined;
+        var kind = kindOf(stream.props, window && window.cls, s);
+        if (kind && !ended[key]) timerNeeded = true;
+        var heldMs = now - heldAt[key], title = window && confirmTitle([window.title], s) || "";
+        var by = "";
+        if (!ended[key] && heldMs >= START_AFTER * 1000) {
+            if (kind === "native" || kind === "webapp") by = kind;
+            else if (kind === "browser") by = title ? "title" : heldMs >= s.maybeDelay * 1000 ? "fallback" : "";
+        }
+        if (by) {
+            var old = confirmed[key];
+            if (!old) confirmed[key] = { by: by, at: now };
+            else if ((old.by === "fallback" && by !== "fallback") || (old.by === "title" && by === "webapp"))
+                confirmed[key] = { by: by, at: old.at };
+        }
+        var level = ended[key] ? "none" : confirmed[key] ? "call" : kind === "browser" && heldMs >= START_AFTER * 1000 ? "maybe" : "none";
+        var item = { key: key, level: level, kind: kind, binding: binding, window: window, props: stream.props,
+                     confirmation: confirmed[key] };
+        if (level === "call") calls.push(item);
+        if (level !== "none") ranked.push(item);
+    });
+    ranked.sort(function(a, b) {
+        if (a.level !== b.level) return a.level === "call" ? -1 : 1;
+        if (a.level === "call") {
+            var af = a.confirmation.by === "fallback", bf = b.confirmation.by === "fallback";
+            if (af !== bf) return af ? 1 : -1;
+            return a.confirmation.at - b.confirmation.at;
+        }
+        return heldAt[a.key] - heldAt[b.key];
+    });
+    var winner = ranked[0], fields = windowFields(calls, prev.fields, s);
+    fields.callBy = winner && winner.level === "call" ? winner.confirmation.by : "";
+    return { heldAt: heldAt, confirmed: confirmed, bindings: bindings, bindHow: bindHow, ended: ended, chains: chains, ambiguous: ambiguous,
+             fields: fields, call: winner ? winner.level : "none",
+             callApp: winner ? callAppName(winner.props) : "",
+             callTitle: winner && winner.level === "call" && winner.kind === "browser" && winner.window ? confirmTitle([winner.window.title], s) : "",
+             needChain: needChain, timerNeeded: timerNeeded };
+}
+
 // Where the service publishes its state for the bar widget and settings
 // panel. It says whether you are in a call and with which app, so it must
 // never land somewhere other users can read: $XDG_RUNTIME_DIR is private to
@@ -227,6 +376,13 @@ if (typeof module !== "undefined")
         classify: classify,
         confirmTitle: confirmTitle,
         decide: decide,
+        streamKey: streamKey,
+        parentFromStat: parentFromStat,
+        kindOf: kindOf,
+        candidates: candidates,
+        bind: bind,
+        windowFields: windowFields,
+        step: step,
         callAppName: callAppName,
         statePath: statePath,
         entryFromConfig: entryFromConfig
