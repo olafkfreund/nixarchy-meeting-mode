@@ -131,8 +131,9 @@ on Do Not Disturb. What uses the microphone is sorted into four kinds:
 - **Call apps** (`nativeApps`; Zoom, Teams, Discord, Vesktop, Slack, Signal, Webex, Cisco
   Collab Host, Element, Skype, Jitsi, Telegram): a call once the app has held the microphone for
   3 seconds.
-- **Web apps** (`webApps`; default `omateams` and `teams-for-linux`, matched against the window
-  class): an app that runs in its own window. A call once its window has held the microphone for
+- **Web apps** (`webApps`; default `omateams`, `teams-for-linux` and `zoom\.us` (Zoom's web
+  client installed as a browser app), matched against the window class): an app that runs in its
+  own window, even when it shares its browser's process. A call once its window has held the microphone for
   3 seconds. An empty `webApps` turns this off.
 - **Browsers** (`browsers`; Chrome and Chromium, Firefox, Brave, Vivaldi, Zen, LibreWolf,
   Edge): a **maybe** after 3 seconds, because a browser may record a voice message too. A maybe

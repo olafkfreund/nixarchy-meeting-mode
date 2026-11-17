@@ -91,8 +91,10 @@ writes the file.
   binary), `webapp` (bound window class), `browser` (name or binary), or
   nothing.
 
-- **`webApps`**, a new setting, default `omateams|teams-for-linux`: a regex on
-  the bound window's class. Empty means off (an empty regex would match every
+- **`webApps`**, a new setting, default `omateams|teams-for-linux|zoom\.us`
+  (owner amendment 2026-11-17: Zoom's web client as a Chrome app): a regex on
+  the bound window's class. Among several windows of one process, a window
+  whose class matches binds like a meeting-title window. Empty means off (an empty regex would match every
   class), as an empty `meetingTitles` does; `normalize()` keeps `""`.
 - **`SettingsModel.decide()`** takes, per stream, `kind`, `heldMs`, and the
   stream's own `windowClass` and `windowTitle`:

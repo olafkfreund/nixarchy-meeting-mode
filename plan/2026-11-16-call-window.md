@@ -97,7 +97,9 @@ need not be opened.
   title. `callBy` is `""` unless `call` is `call`.
 
 ### Settings and patterns
-- `webApps`: new, default `omateams|teams-for-linux`. Empty means off and is
+- `webApps`: new, default `omateams|teams-for-linux|zoom\.us` (owner amendment
+  2026-11-17). Among several windows of one process, a matching class binds
+  like a meeting title. Empty means off and is
   kept by `normalize()`; an invalid regex falls back to the default. Never
   match an empty pattern or an empty class.
 - `meetingTitles` default: remove `\| Microsoft Teams`; `^Zoom( Meeting|
@@ -255,6 +257,8 @@ need not be opened.
 - *Review fix (agy):* an unbound stream no longer matches an unrefreshed window through their empty `stableId`s (it could become a `webapp` or `title` call for good); the refresh check also runs at load.
 - *Owner amendments (workflow: implement, three-lens review, fix; lead review):* `bindHow` records `sole` or `title` per binding (a pid's only window that already has a meeting title counts as `title`); a native stream whose window closes is unbound, not ended. *Deviation:* `windowFields` ignores a native call that has no window when deciding the state, so Discord in the tray does not hide a bound Meet call's window; and `callWindowShowing` is computed only from calls bound to that window (lead fix: an unbound native call made a tab-switched Meet window read as showing).
 - *Step 4 (coder):* README also gained a short paragraph on binding a stream to its window and the end on window close.
+
+- *Owner amendment 2026-11-17 (lead):* a live Zoom web meeting (a Chrome `--app` window, class `chrome-app.zoom.us__…`, sharing Chrome's pid with 8 other windows, title without "Zoom") stayed `maybe` with no window. `webApps` gains `zoom\.us`, and `candidates()`/`bind()` treat a `webApps` class like a meeting title (`strongWindow`), so it binds as `title` and never moves.
 
 ## Tests
 

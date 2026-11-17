@@ -210,6 +210,14 @@ test("missing pid needs no chain and never binds; numeric strings match", () => 
   assert.strictEqual(numeric.bindings["2:123"], "b");
 });
 
+test("a Zoom web app window binds among a browser's windows", () => {
+  const zoom = "chrome-app.zoom.us__wc_join_1-Default";
+  const windows = [win(12, "a", "Inbox", "google-chrome"), win(12, "b", "Some page", "chrome-x-Default"), win(12, "z", "Weekly sync", zoom)];
+  const r = run({}, [stream(1, 30, "Google Chrome input", "chrome")], windows, { "1:30": ["30", "12"] }, 0);
+  assert.strictEqual(r.bindings["1:30"], "z");
+  assert.strictEqual(M.kindOf(capture("Google Chrome input", "chrome"), zoom, D), "webapp");
+});
+
 test("kind priority and empty webApps", () => {
   assert.strictEqual(M.kindOf(capture("Zoom", "zoom"), "omateams", D), "native");
   assert.strictEqual(M.kindOf(capture("Unknown", "unknown"), "omateams", D), "webapp");

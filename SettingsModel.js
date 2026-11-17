@@ -13,7 +13,7 @@ var DEFAULTS = {
     endDelay: 15,           // seconds without a call before everything is put back
     notify: true,           // a notification when meeting mode starts and ends
     nativeApps: "zoom|teams-for-linux|teams|discord|vesktop|slack|signal|webex|CiscoCollabHost|element|skype|jitsi|telegram",
-    webApps: "omateams|teams-for-linux",
+    webApps: "omateams|teams-for-linux|zoom\\.us",
     browsers: "chrom|firefox|brave|vivaldi|zen|librewolf|edge",
     // one regex per line, matched (case-sensitive) against window titles
     meetingTitles: "^Meet - [a-z]{3}-[a-z]{4}-[a-z]{3}\n^Zoom Meeting\nJitsi Meet\nHuddle\nWebex\nMessenger call\nWhatsApp.*[Cc]all",
@@ -228,14 +228,18 @@ function candidates(chain, windows, s) {
         var owned = (windows || []).filter(function(w) { return Number(w.pid) === Number(chain[i]) && Number(chain[i]) > 0; });
         if (owned.length) {
             if (owned.length === 1) return owned;
-            return owned.filter(function(w) { return confirmTitle([w.title], s) !== ""; });
+            // One process, several windows (a browser): only a meeting title or a web-app class names the call's window.
+            return owned.filter(function(w) { return strongWindow(w, s); });
         }
     }
     return [];
 }
 
+function strongWindow(w, s) {
+    return !!s && (confirmTitle([w.title], s) !== "" || matches(s.webApps, "i", String(w.cls || "")));
+}
 function bind(prev, cands, windows, refreshedAll, wasAmbiguous, prevHow, s) {
-    var titled = function(w) { return !!s && confirmTitle([w.title], s) !== ""; };
+    var titled = function(w) { return strongWindow(w, s); };
     if (prev) {
         var held = windows.filter(function(w) { return w.stableId === prev; })[0];
         if (!held) return { stableId: "", ambiguous: false, how: "" };
